@@ -15,6 +15,11 @@
 
 [English](#english) · [中文](#中文)
 
+<br/>
+
+<img src="docs/shot-main.png" width="380" alt="Murmur main window" />
+<img src="docs/shot-recording.png" width="380" alt="Recording — flowing waveform with live transcription preview" />
+
 </div>
 
 ---
