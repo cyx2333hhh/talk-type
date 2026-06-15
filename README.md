@@ -11,6 +11,7 @@
 ![macOS](https://img.shields.io/badge/macOS-14%2B-black)
 ![Swift](https://img.shields.io/badge/Swift-5-orange)
 ![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 [English](#english) · [中文](#中文)
 
@@ -145,6 +146,16 @@ fn / 录音按钮 → 录音(.wav) → 苹果本地语音转文字
 ### 技术
 
 原生 SwiftUI + AppKit。本地语音用 `SFSpeechRecognizer`;文本整理用 DeepSeek 的 OpenAI 兼容对话 API。App 图标与菜单栏图标由 CoreGraphics 脚本程序化生成 —— 改 `Murmur-icongen.swift` 后跑 `swift Murmur-icongen.swift` 即可重新生成。
+
+### 许可证
+
+[MIT](LICENSE) 许可证开源。
+
+---
+
+## License
+
+Released under the [MIT](LICENSE) License.
 
 ---
 
