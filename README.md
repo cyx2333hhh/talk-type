@@ -1,92 +1,153 @@
-# Murmur — Mac 语音输入法
+<div align="center">
 
-按一个快捷键开始说话，再按一次后自动：**语音转文字 → 智能整理排版 + 纠正表达错误 → 插入到当前光标处**。常驻菜单栏，带简约高级的悬浮动画。
+<img src="docs/icon.png" width="120" alt="Murmur app icon" />
 
-- **语音转文字**：始终用 Mac 本地 `SFSpeechRecognizer`（免费、离线、开箱即用）。DeepSeek 没有语音接口，故 STT 一律本地完成。
-- **整理 / 纠错（DeepSeek Key 可选）**：
-  - 不填 Key → 直接插入本地识别的原文
-  - 填了 Key → 本地识别后再用 **DeepSeek**（`deepseek-chat`）做断句、标点、分段、去口水词、纠正口误与表达错误
-- **实时预览**：录音时用苹果本地识别边说边显示文字
-- **录音动画**：小巧灵动的毛玻璃胶囊 + 平滑**流动声纹**（单色、克制、高级）
-- **交互**：全局快捷键「按一下开始 / 再按一下停止」（默认 **fn 键**，可改自定义组合键）
-- **界面**：常规应用，**有 Dock 图标 + 主窗口**（启动即开、点 Dock 可重开），同时保留菜单栏弹窗（大录音按钮 + 实时状态 + 最近记录，可一键复制）
-- **形态**：原生 SwiftUI App，自带黑白 App 图标 + 菜单栏模板图标
+# Murmur
 
-## 运行
+**Minimal voice‑to‑text for macOS — press a key, speak, and your words land at the cursor.**
 
-1. 打开工程：
-   ```bash
-   open Murmur.xcodeproj
-   ```
-2. 在 Xcode 选中 `Murmur` target → Signing & Capabilities，确认 Team（已预填 `7HD58DCN44`，需要时换成你自己的），保持 **未开启 App Sandbox**（默认即未开启——粘贴到其它 App 需要这一点）。
-3. `⌘R` 运行。菜单栏出现 🎙️ 图标。
+**简约的 Mac 语音输入 —— 按一下、说话，文字自动落到当前光标处。**
 
-命令行构建（这台机器需要 `DEVELOPER_DIR`）：
+![macOS](https://img.shields.io/badge/macOS-14%2B-black)
+![Swift](https://img.shields.io/badge/Swift-5-orange)
+![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)
+
+[English](#english) · [中文](#中文)
+
+</div>
+
+---
+
+## English
+
+Murmur lives in your menu bar and Dock. Press a hotkey, speak, press it again — Murmur transcribes your speech **on‑device** with Apple's recognizer and, if you add a DeepSeek key, **tidies it up** (punctuation, paragraphs, removing filler words, fixing slips) before inserting it wherever your cursor is.
+
+No subscription, no account required, and your **audio never leaves your Mac**.
+
+### Features
+
+- 🎙️ **On‑device transcription** — Apple `SFSpeechRecognizer`. Free, offline, private. Works out of the box with no API key.
+- ✨ **Optional AI cleanup** — add a [DeepSeek](https://platform.deepseek.com) key to auto‑punctuate, paragraph, de‑filler and fix expression. The key is **optional** and stored only in the macOS Keychain.
+- ⌨️ **Global hotkey** — default is the **fn / 🌐** key; tap to start, tap to stop. Re‑bindable to any shortcut.
+- 📋 **Inserts at the cursor** — auto‑pastes into any app, with a one‑tap **Copy** fallback when a paste lands in the wrong place.
+- 🪟 **Real UI** — menu‑bar popover **and** a main window with a Dock icon (so it's reachable even when the menu bar is crowded behind the notch).
+- 〰️ **Live preview + flowing waveform** — see words appear as you speak, in a small, refined frosted pill.
+- 🕘 **Recent history** — your last dictations, each copyable.
+- 🔒 **Privacy‑first** — audio stays local; only the recognized *text* is sent to DeepSeek, and only if you opt in.
+
+### Requirements
+
+- macOS 14 (Sonoma) or later
+- Xcode 16+ to build
+- *(optional)* a DeepSeek API key for the cleanup pass
+
+### Build & run
+
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  xcodebuild -project Murmur.xcodeproj -target Murmur -configuration Debug build
+git clone https://github.com/cyx2333hhh/murmur-mac.git
+cd murmur-mac
+open Murmur.xcodeproj
 ```
 
-## 首次设置（主窗口或菜单栏 →「设置…」）
+In Xcode, select the **Murmur** target → *Signing & Capabilities* → set your own **Team**, then press ⌘R. Keep **App Sandbox off** (it's off by default — pasting into other apps needs that).
 
-1. **DeepSeek API Key（可选）**：留空即只用 Mac 本地识别插入原文；填入 `sk-…` 则在本地识别后用 DeepSeek 智能整理 / 纠错（保存在系统钥匙串）。
-2. **权限**：
-   - **麦克风** —— 点「去开启」授权（用于录音）。
-   - **语音识别** —— 点「去开启」授权（本地识别 / 实时预览都要用；不填 Key 时是主识别引擎）。
-   - **辅助功能** —— 点「去开启」，在系统设置里勾选 Murmur（用于模拟 ⌘V 自动粘贴）。
-     未授权时不会自动粘贴，结果会留在剪贴板，手动按 ⌘V 即可。
-3. **录音体验**：可开关「录音时实时转写预览」。
-4. **快捷键**：默认 **fn 键**。可点「用 fn 键」，或点当前按钮后按下任意自定义组合键。
-   - fn 全局触发需要「辅助功能」权限；若按 fn 弹出表情面板，去 系统设置→键盘→「按 🌐 键时」设为「无操作」。
-5. **模型 / 语言**（可选，有默认值）：
-   - 整理模型：`deepseek-chat`（默认）或 `deepseek-reasoner`
-   - 语言：本地识别语言，默认 `zh`，留空为自动识别
-   - 可关闭「用 DeepSeek 整理 / 纠错」，只做本地纯转写
+Command‑line build:
 
-## 使用
-
-1. 在任意 App（备忘录、微信、浏览器输入框…）把光标放到要输入的位置。
-2. 按 **fn 键**（或点菜单栏弹窗里的录音按钮）→ 悬浮面板出现，开始说话（红点 + 动画 + 计时）。
-3. 再按一次 fn → 面板显示「转写中 → 智能整理 → 插入」，完成后文本自动出现在光标处。
-
-点菜单栏图标会弹出**主界面**：大录音按钮、当前状态、最近记录（可复制 / 删除 / 清空）、设置入口。
-
-完成后悬浮胶囊上有**「复制」按钮**：当自动粘贴落点不准时，点它即可把本次结果复制到剪贴板自行粘贴（主界面「最近」里每条也能复制）。
-
-## 工作流程
-
-```
-fn 键 / 录音按钮 → 录音(.wav) → Mac 本地识别 → [可选] DeepSeek 整理/纠错 → 写入剪贴板 + 模拟⌘V → 还原剪贴板
+```bash
+xcodebuild -project Murmur.xcodeproj -target Murmur -configuration Debug build
+# or, without signing:
+xcodebuild -project Murmur.xcodeproj -target Murmur CODE_SIGNING_ALLOWED=NO build
 ```
 
-> 隐私：音频不出本机（本地识别）；只有当填了 DeepSeek Key 且开启整理时，识别出的**文本**会发给 DeepSeek 做润色。
+### First‑time setup
 
-源码结构（`Murmur/`）：
+1. **DeepSeek API Key (optional)** — Settings → leave empty to use local recognition only, or paste `sk-…` to enable cleanup.
+2. **Permissions** — grant **Microphone**, **Speech Recognition**, and **Accessibility** (Accessibility powers auto‑paste; without it the result is copied to the clipboard for you to paste manually).
+3. **Hotkey** — fn is the default. Global fn triggering needs Accessibility. If pressing fn opens the emoji picker, set *System Settings → Keyboard → "Press 🌐 key to" → Do Nothing*.
 
-| 文件 | 职责 |
-|------|------|
-| `MurmurApp.swift` | App 入口、菜单栏、accessory 策略 |
-| `AppState.swift` | 状态机与整体流程编排、设置读取 |
-| `AudioCapture.swift` | AVAudioEngine：写文件 + 实时电平 + 本地识别（实时预览 + 文件最终转写） |
-| `DeepSeekClient.swift` | DeepSeek 对话 API（仅文本整理/纠错；OpenAI 兼容） |
-| `TextInserter.swift` | 剪贴板 + 模拟 ⌘V 粘贴（含剪贴板还原） |
-| `HotKeyManager.swift` | Carbon 全局快捷键（自定义组合键时用） |
-| `FnKeyMonitor.swift` | fn / 🌐 键监听（flagsChanged，keyCode 63） |
-| `KeychainHelper.swift` | DeepSeek Key 钥匙串读写 |
-| `PanelController.swift` | 固定尺寸非激活悬浮面板（小巧灵动胶囊） |
-| `RecordingOverlayView.swift` | 悬浮胶囊：流动声纹动画、实时预览、状态、完成态「复制」按钮 |
-| `WaveAnimation.swift` | 流动声纹动画 `FlowWaveView`（Canvas 平滑曲线 + 渐变 + 辉光） |
-| `HomeView.swift` | 主界面：录音按钮 + 状态 + 最近记录（用于主窗口和菜单栏弹窗） |
-| `MainWindowController.swift` | 主窗口（AppKit 托管，启动/点 Dock 时显示） |
-| `SettingsView.swift` | 设置面板 + 快捷键录制 |
-| `SettingsWindowController.swift` | AppKit 托管的设置窗口 |
-| `Assets.xcassets` | App 图标全套尺寸 + 菜单栏模板图标 |
+### Usage
 
-图标是用 `Murmur-icongen.swift`（CoreGraphics 脚本）程序化生成的；要改配色/造型，编辑该脚本后重跑 `swift Murmur-icongen.swift` 即可重新生成整套资源。
+Put your cursor in any text field → press **fn** → speak → press **fn** again. The text is transcribed, optionally cleaned up, and inserted at the cursor.
 
-## 说明与边界
+### How it works
 
-- **未签名/沙盒**：为了能把文字粘贴进其它 App 并模拟按键，App **不开启沙盒**；自动粘贴依赖系统「辅助功能」授权。
-- **隐私**：音频不出本机（本地识别）；仅在填了 DeepSeek Key 且开启整理时，识别出的文本会发给 DeepSeek 润色。
-- **快捷键**：默认 fn 键（需辅助功能权限才能全局触发）；可在设置改成自定义组合键。fn 若触发系统🌐行为，把 系统设置→键盘→「按🌐键时」设为「无操作」。
-- **测试**：核心链路依赖实时麦克风、网络与系统级权限（TCC），难以做有意义的自动化 UI 测试；当前以「构建通过 + 启动冒烟」为验证基线，建议手动走一遍真实链路。
+```
+fn / record button → record (.wav) → Apple on‑device speech‑to‑text
+                                    → [optional] DeepSeek tidy‑up
+                                    → clipboard + synthesized ⌘V → restore clipboard
+```
+
+### Tech
+
+Native SwiftUI + AppKit. Local speech via `SFSpeechRecognizer`; text cleanup via DeepSeek's OpenAI‑compatible chat API. The app icon and menu‑bar glyphs are generated programmatically with CoreGraphics — edit `Murmur-icongen.swift` and run `swift Murmur-icongen.swift` to regenerate.
+
+---
+
+## 中文
+
+Murmur 常驻菜单栏和 Dock。按一下快捷键、说话、再按一下 —— Murmur 用苹果识别引擎在**本机**把语音转成文字;如果你填了 DeepSeek 密钥,它还会**自动整理**(加标点、分段、去口水词、纠正口误),然后插入到你光标所在的任何位置。
+
+无需订阅、无需账号,而且**音频不会离开你的 Mac**。
+
+### 功能
+
+- 🎙️ **本地转写** —— 苹果 `SFSpeechRecognizer`,免费、离线、隐私好。**不填任何 Key 也能直接用。**
+- ✨ **可选 AI 整理** —— 填入 [DeepSeek](https://platform.deepseek.com) 密钥即可自动断句、分段、去口水词、纠正表达。密钥**可选**,且只存在系统钥匙串里。
+- ⌨️ **全局快捷键** —— 默认 **fn / 🌐** 键,按一下开始、再按一下停止;可改成任意组合键。
+- 📋 **插入到光标处** —— 自动粘贴进任何 App;万一落点不准,还有一键**复制**兜底。
+- 🪟 **真正的界面** —— 菜单栏弹窗 **+** 带 Dock 图标的主窗口(刘海屏菜单栏被挤满时也找得到)。
+- 〰️ **实时预览 + 流动声纹** —— 边说边出字,配小巧克制的毛玻璃胶囊。
+- 🕘 **最近记录** —— 保留最近的转写结果,每条都能复制。
+- 🔒 **隐私优先** —— 音频只在本地;只有识别出的**文本**才会(在你选择开启时)发给 DeepSeek。
+
+### 环境要求
+
+- macOS 14(Sonoma)及以上
+- 构建需 Xcode 16+
+- *(可选)* DeepSeek API 密钥(用于整理环节)
+
+### 构建与运行
+
+```bash
+git clone https://github.com/cyx2333hhh/murmur-mac.git
+cd murmur-mac
+open Murmur.xcodeproj
+```
+
+在 Xcode 选中 **Murmur** target → *Signing & Capabilities* → 换成**你自己的 Team**,然后 ⌘R 运行。保持 **App Sandbox 关闭**(默认即关闭 —— 粘贴到其它 App 需要这一点)。
+
+命令行构建:
+
+```bash
+xcodebuild -project Murmur.xcodeproj -target Murmur -configuration Debug build
+# 或不签名:
+xcodebuild -project Murmur.xcodeproj -target Murmur CODE_SIGNING_ALLOWED=NO build
+```
+
+### 首次设置
+
+1. **DeepSeek API Key(可选)** —— 设置里留空则只用本地识别;填入 `sk-…` 则启用整理。
+2. **权限** —— 授权**麦克风**、**语音识别**、**辅助功能**(辅助功能用于自动粘贴;没授权时结果会复制到剪贴板,手动 ⌘V 即可)。
+3. **快捷键** —— 默认 fn。fn 全局触发需要辅助功能权限。若按 fn 会弹出表情面板,去 *系统设置 → 键盘 → "按 🌐 键时" → 无操作*。
+
+### 使用
+
+把光标放进任意输入框 → 按 **fn** → 说话 → 再按 **fn**。文字会被转写、(可选)整理,并插入到光标处。
+
+### 工作原理
+
+```
+fn / 录音按钮 → 录音(.wav) → 苹果本地语音转文字
+                            → (可选) DeepSeek 整理润色
+                            → 写入剪贴板 + 模拟 ⌘V → 还原剪贴板
+```
+
+### 技术
+
+原生 SwiftUI + AppKit。本地语音用 `SFSpeechRecognizer`;文本整理用 DeepSeek 的 OpenAI 兼容对话 API。App 图标与菜单栏图标由 CoreGraphics 脚本程序化生成 —— 改 `Murmur-icongen.swift` 后跑 `swift Murmur-icongen.swift` 即可重新生成。
+
+---
+
+<div align="center">
+<sub>Built with ❤️ on macOS · 用 ❤️ 在 macOS 上打造</sub>
+</div>
