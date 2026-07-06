@@ -30,29 +30,48 @@ struct HomeView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: 12)
+            headerActions
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 8) {
             Button {
                 SettingsWindowController.shared.show()
             } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14))
+                headerActionIcon("gearshape")
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help("设置")
+            .accessibilityLabel("设置")
 
             Menu {
                 Button("设置…") { SettingsWindowController.shared.show() }
                 Divider()
                 Button("退出 Murmur") { NSApp.terminate(nil) }
             } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 14))
+                headerActionIcon("ellipsis")
             }
             .menuStyle(.borderlessButton)
-            .frame(width: 20)
+            .menuIndicator(.hidden)
+            .frame(width: 28, height: 28)
+            .focusable(false)
+            .help("更多")
+            .accessibilityLabel("更多")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .fixedSize()
+    }
+
+    private func headerActionIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(.primary)
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
     }
 
     // MARK: - Hero
@@ -96,16 +115,21 @@ struct HomeView: View {
 
     private var recent: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("最近")
+            HStack(spacing: 6) {
+                Label("最近记录", systemImage: "clock.arrow.circlepath")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if !app.history.isEmpty {
-                    Button("清空") { app.clearHistory() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
+                    Button {
+                        app.clearHistory()
+                    } label: {
+                        Text("清空")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help("清空最近记录")
                 }
             }
             .padding(.horizontal, 16)

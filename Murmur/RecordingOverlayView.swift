@@ -8,7 +8,7 @@ struct RecordingOverlayView: View {
     @State private var copied = false
 
     /// Fixed panel size; transparent margin around the pill leaves room for the shadow.
-    static let panelSize = CGSize(width: 300, height: 96)
+    static let panelSize = CGSize(width: 320, height: 92)
 
     var body: some View {
         pill
@@ -17,13 +17,43 @@ struct RecordingOverlayView: View {
 
     private var pill: some View {
         content
-            .padding(.horizontal, 15)
-            .padding(.vertical, 9)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
+            .padding(.horizontal, 14)
+            .padding(.vertical, app.partialText.isEmpty ? 10 : 9)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.black.opacity(0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(recordingStroke, lineWidth: 0.5)
+            )
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.11), lineWidth: 0.5)
+                    .blur(radius: 0.4)
+                    .mask(
+                        LinearGradient(colors: [.white, .clear],
+                                       startPoint: .top,
+                                       endPoint: .center)
+                    )
+            }
+            .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+            .shadow(color: recordingGlow,
+                    radius: app.phase == .recording ? 8 : 0,
+                    y: app.phase == .recording ? 3 : 0)
             .animation(.spring(response: 0.32, dampingFraction: 0.82), value: app.phase)
             .animation(.easeOut(duration: 0.18), value: app.partialText.isEmpty)
+    }
+
+    private var recordingStroke: Color {
+        app.phase == .recording
+            ? Color.accentColor.opacity(0.13 + min(0.11, app.audioLevel * 0.14))
+            : Color.white.opacity(0.12)
+    }
+
+    private var recordingGlow: Color {
+        Color.accentColor.opacity(0.025 + min(0.05, app.audioLevel * 0.06))
     }
 
     @ViewBuilder private var content: some View {
@@ -36,11 +66,12 @@ struct RecordingOverlayView: View {
     // MARK: - Recording
 
     private var recording: some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 8) {
-                PulsingDot()
-                FlowWaveView(levels: app.levels)
-                    .frame(width: 128, height: 24)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                VoiceLensView(level: app.audioLevel)
+                    .frame(width: 18, height: 18)
+                SpectralWaveView(levels: app.levels, level: app.audioLevel)
+                    .frame(width: 156, height: 24)
                 Text(timeString(app.recordingSeconds))
                     .font(.system(size: 11.5, weight: .medium, design: .rounded))
                     .monospacedDigit()
@@ -52,7 +83,7 @@ struct RecordingOverlayView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.head)
-                    .frame(maxWidth: 250)
+                    .frame(width: 254, alignment: .leading)
             }
         }
     }
@@ -132,21 +163,34 @@ struct RecordingOverlayView: View {
     }
 }
 
-/// A small pulsing red dot used during recording.
-struct PulsingDot: View {
-    @State private var animate = false
+/// A small glassy listening indicator. It reacts to audio without becoming a logo.
+struct VoiceLensView: View {
+    let level: CGFloat
 
     var body: some View {
-        Circle()
-            .fill(Color.red)
-            .frame(width: 7, height: 7)
-            .scaleEffect(animate ? 1.0 : 0.55)
-            .opacity(animate ? 1.0 : 0.45)
-            .shadow(color: .red.opacity(0.6), radius: animate ? 4 : 1)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
-                    animate = true
-                }
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let safeLevel = max(0.03, min(1, level))
+            let breath = CGFloat(0.5 + 0.5 * sin(t * 2.2))
+            let ringScale = 0.88 + safeLevel * 0.16 + breath * 0.04
+            let coreScale = 0.44 + safeLevel * 0.18 + breath * 0.04
+
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.055 + safeLevel * 0.035))
+                Circle()
+                    .stroke(Color.white.opacity(0.22), lineWidth: 0.6)
+                Circle()
+                    .stroke(Color.accentColor.opacity(0.28 + safeLevel * 0.16), lineWidth: 1)
+                    .scaleEffect(ringScale)
+                Circle()
+                    .fill(Color.accentColor.opacity(0.76))
+                    .scaleEffect(coreScale)
+                    .shadow(color: Color.accentColor.opacity(0.24 + safeLevel * 0.18),
+                            radius: 2 + safeLevel * 2)
             }
+            .animation(.easeOut(duration: 0.12), value: level)
+        }
+        .accessibilityLabel("正在录音")
     }
 }

@@ -9,6 +9,8 @@ struct SettingsView: View {
 
     @AppStorage(Keys.chatModel) private var chatModel = "deepseek-chat"
     @AppStorage(Keys.language) private var language = "zh"
+    @AppStorage(Keys.recognitionContext) private var recognitionContext = Keys.defaultRecognitionContext
+    @AppStorage(Keys.enableBilingualRecognition) private var enableBilingualRecognition = false
     @AppStorage(Keys.enableCorrection) private var enableCorrection = true
     @AppStorage(Keys.enableLivePreview) private var enableLivePreview = true
     @AppStorage(Keys.hotKeyDisplay) private var hotKeyDisplay = "⌃⌥Space"
@@ -19,6 +21,7 @@ struct SettingsView: View {
     @State private var micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
     @State private var speechStatus = SFSpeechRecognizer.authorizationStatus()
     @State private var axTrusted = AXIsProcessTrusted()
+    @FocusState private var apiKeyFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -36,6 +39,7 @@ struct SettingsView: View {
         .onAppear {
             apiKey = KeychainHelper.load() ?? ""
             refreshPermissions()
+            apiKeyFocused = false
         }
         .onDisappear { stopRecordingHotKey() }
     }
@@ -57,7 +61,20 @@ struct SettingsView: View {
     private var apiSection: some View {
         section("DeepSeek API Key（可选）") {
             SecureField("sk-…（留空则只用本地识别，不做整理）", text: $apiKey)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .focused($apiKeyFocused)
+                .font(.system(size: 13))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(apiKeyFocused ? Color.accentColor.opacity(0.55) : Color.secondary.opacity(0.22),
+                                lineWidth: apiKeyFocused ? 1.5 : 1)
+                )
                 .onChange(of: apiKey) { _, newValue in
                     KeychainHelper.save(newValue.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
@@ -79,10 +96,37 @@ struct SettingsView: View {
             labeledField("整理模型", text: $chatModel,
                          hint: "DeepSeek 模型：deepseek-chat（默认）或 deepseek-reasoner")
             labeledField("语言", text: $language,
-                         hint: "本地识别语言；留空为自动，中文填 zh")
+                         hint: "本地识别语言；留空为自动，中文填 zh，英文填 en-US")
+            vocabularyField
+            Toggle("实验：额外跑英文识别（默认关闭，避免中文被误改成英文）",
+                   isOn: $enableBilingualRecognition)
+                .font(.system(size: 12.5))
+            Text("仅在中文主识别里有明显英文词但识别很差时再手动开启；中文主识别始终优先。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
             Toggle("用 DeepSeek 智能整理 / 纠错（自动排版、断句、去口水词、纠正表达）",
                    isOn: $enableCorrection)
                 .font(.system(size: 12.5))
+        }
+    }
+
+    private var vocabularyField: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("中英混合词库")
+                .font(.system(size: 12.5))
+            TextEditor(text: $recognitionContext)
+                .font(.system(size: 12.5))
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+                .frame(height: 86)
+            Text("每行或用逗号分隔一个英文词/专名；用于 DeepSeek 整理参考，不再直接干预 Apple 中文识别。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 

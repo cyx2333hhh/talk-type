@@ -6,6 +6,9 @@ import Combine
 enum Keys {
     static let chatModel = "chatModel"
     static let language = "language"
+    static let recognitionContext = "recognitionContext"
+    static let enableBilingualRecognition = "enableBilingualRecognition"
+    static let bilingualRecognitionSafetyReset = "bilingualRecognitionSafetyReset"
     static let enableCorrection = "enableCorrection"
     static let enableLivePreview = "enableLivePreview"
     static let useFnKey = "useFnKey"
@@ -14,10 +17,58 @@ enum Keys {
     static let hotKeyDisplay = "hotKeyDisplay"
     static let historyData = "historyData"
 
+    static let defaultRecognitionContext = """
+    DeepSeek
+    ChatGPT
+    GPT
+    Claude
+    Codex
+    OpenAI
+    API
+    key
+    macOS
+    iOS
+    Swift
+    SwiftUI
+    Xcode
+    GitHub
+    Git
+    branch
+    commit
+    pull request
+    README
+    JSON
+    HTTP
+    URL
+    SQL
+    JavaScript
+    TypeScript
+    Python
+    React
+    Vue
+    Node.js
+    npm
+    Docker
+    Kubernetes
+    Terminal
+    shell
+    Safari
+    Chrome
+    Finder
+    Notion
+    Figma
+    Cursor
+    VS Code
+    App Store
+    Apple
+    """
+
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
             chatModel: "deepseek-chat",
             language: "zh",
+            recognitionContext: defaultRecognitionContext,
+            enableBilingualRecognition: false,
             enableCorrection: true,
             enableLivePreview: true,
             useFnKey: true,
@@ -71,6 +122,7 @@ final class AppState: ObservableObject {
     private let capture = AudioCapture()
     private var clockTimer: Timer?
     private var hideTask: Task<Void, Never>?
+    private var isStarting = false
 
     private lazy var panel = PanelController(
         content: AnyView(RecordingOverlayView().environmentObject(self)),
@@ -86,6 +138,7 @@ final class AppState: ObservableObject {
 
     func bootstrap() {
         Keys.registerDefaults()
+        resetUnsafeBilingualDefaultIfNeeded()
         capture.onLevel = { [weak self] level in
             MainActor.assumeIsolated { self?.pushLevel(level) }
         }
@@ -139,11 +192,28 @@ final class AppState: ObservableObject {
     private var livePreviewEnabled: Bool {
         UserDefaults.standard.bool(forKey: Keys.enableLivePreview)
     }
+    private var bilingualRecognitionEnabled: Bool {
+        UserDefaults.standard.bool(forKey: Keys.enableBilingualRecognition)
+    }
+    private var recognitionContextTerms: [String] {
+        let raw = UserDefaults.standard.string(forKey: Keys.recognitionContext)
+            ?? Keys.defaultRecognitionContext
+        return AppState.parseRecognitionContext(raw)
+    }
     private var recognitionLocale: String {
         let lang = language
         if lang.isEmpty { return Locale.current.identifier }
         if lang.lowercased().hasPrefix("zh") { return "zh-CN" }
         return lang
+    }
+    private var shouldRunEnglishAssist: Bool {
+        bilingualRecognitionEnabled && recognitionLocale.lowercased().hasPrefix("zh")
+    }
+
+    private func resetUnsafeBilingualDefaultIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: Keys.bilingualRecognitionSafetyReset) else { return }
+        UserDefaults.standard.set(false, forKey: Keys.enableBilingualRecognition)
+        UserDefaults.standard.set(true, forKey: Keys.bilingualRecognitionSafetyReset)
     }
 
     var hotKeyDisplay: String {
@@ -160,6 +230,7 @@ final class AppState: ObservableObject {
     // MARK: - Flow
 
     func toggle() {
+        guard !isStarting else { return }
         switch phase {
         case .idle, .success, .failed:
             Task { await start() }
@@ -171,6 +242,10 @@ final class AppState: ObservableObject {
     }
 
     private func start() async {
+        guard !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
+
         errorMessage = nil
         partialText = ""
         hideTask?.cancel()
@@ -187,7 +262,8 @@ final class AppState: ObservableObject {
 
         do {
             try capture.start(livePreview: speechGranted && livePreviewEnabled,
-                              localeIdentifier: recognitionLocale)
+                              localeIdentifier: recognitionLocale,
+                              contextualStrings: [])
         } catch {
             fail("录音启动失败：\(error.localizedDescription)")
             return
@@ -205,11 +281,14 @@ final class AppState: ObservableObject {
             fail("没有录到音频。")
             return
         }
+        defer { try? FileManager.default.removeItem(at: url) }
 
         // 1) Transcribe locally with Apple's recognizer.
         phase = .transcribing
-        let recognized = await AudioCapture.recognizeFile(url, localeIdentifier: recognitionLocale)
-        try? FileManager.default.removeItem(at: url)
+        let contextualStrings = recognitionContextTerms
+        let recognized = await AudioCapture.recognizeFile(url,
+                                                          localeIdentifier: recognitionLocale,
+                                                          contextualStrings: [])
 
         let raw = (recognized ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
@@ -221,9 +300,23 @@ final class AppState: ObservableObject {
         var text = raw
         let key = KeychainHelper.load() ?? ""
         if correctionEnabled, !key.isEmpty {
+            let englishAssist: String?
+            if shouldRunEnglishAssist {
+                englishAssist = await AudioCapture.recognizeFile(url,
+                                                                 localeIdentifier: "en-US",
+                                                                 contextualStrings: contextualStrings)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                englishAssist = nil
+            }
+
             phase = .correcting
-            if let cleaned = try? await DeepSeekClient(apiKey: key).correct(raw, model: chatModel),
-               !cleaned.isEmpty {
+            if let cleaned = try? await DeepSeekClient(apiKey: key).correct(raw,
+                                                                            model: chatModel,
+                                                                            contextualStrings: contextualStrings,
+                                                                            englishTranscript: englishAssist),
+               !cleaned.isEmpty,
+               AppState.shouldAcceptCorrectedText(raw: raw, cleaned: cleaned) {
                 text = cleaned
             }
         }
@@ -291,6 +384,72 @@ final class AppState: ObservableObject {
             return []
         }
         return records
+    }
+
+    static func parseRecognitionContext(_ raw: String) -> [String] {
+        raw.components(separatedBy: CharacterSet(charactersIn: "\n,，、;；"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { result, term in
+                if !result.contains(where: { $0.caseInsensitiveCompare(term) == .orderedSame }) {
+                    result.append(term)
+                }
+            }
+    }
+
+    private static func shouldAcceptCorrectedText(raw: String, cleaned: String) -> Bool {
+        let rawSignal = signalCharacterCount(raw)
+        let cleanedSignal = signalCharacterCount(cleaned)
+        if rawSignal >= 18, cleanedSignal < Int(Double(rawSignal) * 0.68) {
+            return false
+        }
+        if rawSignal >= 10, rawSignal - cleanedSignal >= 18, cleanedSignal < Int(Double(rawSignal) * 0.78) {
+            return false
+        }
+        if !preservesDigitRuns(raw: raw, cleaned: cleaned) {
+            return false
+        }
+
+        let rawHan = hanCharacterCount(raw)
+        guard rawHan >= 2 else { return true }
+
+        let cleanedHan = hanCharacterCount(cleaned)
+        let cleanedLatin = latinLetterCount(cleaned)
+
+        if cleanedHan == 0, cleanedLatin >= 3 {
+            return false
+        }
+        if rawHan >= 6, cleanedHan < max(3, rawHan / 3), cleanedLatin > max(6, cleanedHan * 2) {
+            return false
+        }
+        return true
+    }
+
+    private static func signalCharacterCount(_ text: String) -> Int {
+        text.unicodeScalars.filter {
+            (0x4E00...0x9FFF).contains($0.value)
+                || (0x41...0x5A).contains($0.value)
+                || (0x61...0x7A).contains($0.value)
+                || (0x30...0x39).contains($0.value)
+        }.count
+    }
+
+    private static func preservesDigitRuns(raw: String, cleaned: String) -> Bool {
+        let runs = raw.split { !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 2 }
+        guard !runs.isEmpty else { return true }
+        return runs.allSatisfy { cleaned.contains($0) }
+    }
+
+    private static func hanCharacterCount(_ text: String) -> Int {
+        text.unicodeScalars.filter { (0x4E00...0x9FFF).contains($0.value) }.count
+    }
+
+    private static func latinLetterCount(_ text: String) -> Int {
+        text.unicodeScalars.filter {
+            (0x41...0x5A).contains($0.value) || (0x61...0x7A).contains($0.value)
+        }.count
     }
 
     // MARK: - Result presentation

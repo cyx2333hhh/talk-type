@@ -1,72 +1,62 @@
 import SwiftUI
 
-/// The recording animation: a smooth, flowing mirrored waveform ribbon with a
-/// soft glow, drawn with Canvas + TimelineView. Monochrome accent (minimal).
-struct FlowWaveView: View {
+/// A quiet, premium spectrum for dictation state.
+/// It avoids decorative assistant-orb styling and behaves like a system status
+/// indicator: low contrast, audio-reactive, and compact.
+struct SpectralWaveView: View {
     let levels: [CGFloat]
+    let level: CGFloat
+
+    private let barCount = 19
 
     var body: some View {
         TimelineView(.animation) { timeline in
             Canvas { context, size in
-                FlowWaveView.draw(context, size, levels,
-                                  timeline.date.timeIntervalSinceReferenceDate)
+                draw(context, size, time: timeline.date.timeIntervalSinceReferenceDate)
             }
         }
     }
 
-    private static func draw(_ context: GraphicsContext, _ size: CGSize,
-                             _ levels: [CGFloat], _ t: TimeInterval) {
-        let n = levels.count
-        guard n > 1 else { return }
-        let w = size.width, h = size.height
-        let midY = h / 2
-        let maxAmp = h * 0.46
-        let stepX = w / CGFloat(n - 1)
+    private func draw(_ context: GraphicsContext, _ size: CGSize, time: TimeInterval) {
+        guard size.width > 0, size.height > 0 else { return }
+
         let accent = Color.accentColor
+        let height = size.height
+        let width = size.width
+        let midY = height / 2
+        let gap: CGFloat = 4
+        let barWidth = max(2.4, (width - gap * CGFloat(barCount - 1)) / CGFloat(barCount))
+        let recent = Array(levels.suffix(barCount))
+        let fallback = max(0.03, min(1, level))
 
-        func amp(_ i: Int) -> CGFloat {
-            let flow = 0.82 + 0.18 * sin(t * 2.1 + Double(i) * 0.5)
-            return max(1.0, levels[i] * maxAmp * CGFloat(flow))
-        }
+        for i in 0..<barCount {
+            let source = i < recent.count ? recent[i] : fallback
+            let progress = CGFloat(i) / CGFloat(max(1, barCount - 1))
+            let centerWeight = 0.58 + 0.42 * sin(.pi * progress)
+            let shimmer = CGFloat(0.88 + 0.12 * sin(time * 2.1 + Double(i) * 0.58))
+            let normalized = max(0.035, min(1, source))
+            let visual = min(1, normalized * centerWeight * shimmer)
+            let barHeight = max(3.2, min(height * 0.92, 3.2 + visual * height * 0.82))
+            let x = CGFloat(i) * (barWidth + gap)
+            let y = midY - barHeight / 2
+            let rect = CGRect(x: x, y: y, width: barWidth, height: barHeight)
+            let path = Path(roundedRect: rect, cornerRadius: barWidth / 2)
+            let opacity = 0.22 + min(0.56, visual * 0.62)
 
-        var topPts: [CGPoint] = []
-        var botPts: [CGPoint] = []
-        for i in 0..<n {
-            let x = CGFloat(i) * stepX
-            let a = amp(i)
-            topPts.append(CGPoint(x: x, y: midY - a))
-            botPts.append(CGPoint(x: x, y: midY + a))
-        }
-
-        func appendSmooth(_ path: inout Path, _ pts: [CGPoint], start: Bool) {
-            if start { path.move(to: pts[0]) } else { path.addLine(to: pts[0]) }
-            for i in 0..<pts.count - 1 {
-                let mid = CGPoint(x: (pts[i].x + pts[i + 1].x) / 2,
-                                  y: (pts[i].y + pts[i + 1].y) / 2)
-                path.addQuadCurve(to: mid, control: pts[i])
+            context.drawLayer { layer in
+                layer.addFilter(.blur(radius: 1.6))
+                layer.fill(path, with: .color(accent.opacity(opacity * 0.28)))
             }
-            path.addLine(to: pts[pts.count - 1])
-        }
 
-        var body = Path()
-        appendSmooth(&body, topPts, start: true)
-        appendSmooth(&body, Array(botPts.reversed()), start: false)
-        body.closeSubpath()
-
-        // Soft glow underneath.
-        context.drawLayer { layer in
-            layer.addFilter(.blur(radius: 4))
-            layer.fill(body, with: .color(accent.opacity(0.45)))
+            context.fill(path, with: .linearGradient(
+                Gradient(colors: [
+                    accent.opacity(opacity * 0.52),
+                    accent.opacity(opacity),
+                    accent.opacity(opacity * 0.52),
+                ]),
+                startPoint: CGPoint(x: rect.midX, y: rect.minY),
+                endPoint: CGPoint(x: rect.midX, y: rect.maxY)
+            ))
         }
-        // Gradient body — bright at the centerline, fading toward the edges.
-        context.fill(body, with: .linearGradient(
-            Gradient(colors: [accent.opacity(0.20), accent.opacity(0.85), accent.opacity(0.20)]),
-            startPoint: CGPoint(x: w / 2, y: 0),
-            endPoint: CGPoint(x: w / 2, y: h)))
-        // Crisp edges.
-        var topLine = Path(); appendSmooth(&topLine, topPts, start: true)
-        context.stroke(topLine, with: .color(accent), lineWidth: 1.2)
-        var botLine = Path(); appendSmooth(&botLine, botPts, start: true)
-        context.stroke(botLine, with: .color(accent.opacity(0.7)), lineWidth: 1.0)
     }
 }

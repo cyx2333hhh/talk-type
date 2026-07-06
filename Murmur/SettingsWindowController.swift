@@ -25,5 +25,9 @@ final class SettingsWindowController {
             window = w
         }
         window?.makeKeyAndOrderFront(nil)
+        let currentWindow = window
+        DispatchQueue.main.async {
+            currentWindow?.makeFirstResponder(nil)
+        }
     }
 }

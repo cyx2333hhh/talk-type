@@ -20,7 +20,7 @@ final class AudioCapture {
     var onLevel: ((CGFloat) -> Void)?
     var onPartial: ((String) -> Void)?
 
-    func start(livePreview: Bool, localeIdentifier: String) throws {
+    func start(livePreview: Bool, localeIdentifier: String, contextualStrings: [String]) throws {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
 
@@ -30,7 +30,8 @@ final class AudioCapture {
         fileURL = url
 
         if livePreview {
-            setupRecognition(localeIdentifier: localeIdentifier)
+            setupRecognition(localeIdentifier: localeIdentifier,
+                             contextualStrings: contextualStrings)
         }
 
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
@@ -45,7 +46,7 @@ final class AudioCapture {
         try engine.start()
     }
 
-    private func setupRecognition(localeIdentifier: String) {
+    private func setupRecognition(localeIdentifier: String, contextualStrings: [String]) {
         let rec = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
             ?? SFSpeechRecognizer()
         guard let rec, rec.isAvailable,
@@ -54,6 +55,7 @@ final class AudioCapture {
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
+        req.contextualStrings = contextualStrings
         request = req
         task = rec.recognitionTask(with: req) { [weak self] result, _ in
             guard let self, let result else { return }
@@ -94,7 +96,9 @@ final class AudioCapture {
     /// One-shot on-device/server recognition of a recorded file — used as the
     /// final transcription when no OpenAI key is set. Returns nil if speech
     /// recognition isn't authorized or available.
-    static func recognizeFile(_ url: URL, localeIdentifier: String) async -> String? {
+    static func recognizeFile(_ url: URL,
+                              localeIdentifier: String,
+                              contextualStrings: [String]) async -> String? {
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else { return nil }
         let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
             ?? SFSpeechRecognizer()
@@ -103,6 +107,7 @@ final class AudioCapture {
         return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
             let request = SFSpeechURLRecognitionRequest(url: url)
             request.shouldReportPartialResults = false
+            request.contextualStrings = contextualStrings
             var resumed = false
             var task: SFSpeechRecognitionTask?
             task = recognizer.recognitionTask(with: request) { [recognizer] result, error in
