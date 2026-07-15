@@ -3,7 +3,7 @@ import Speech
 import CoreGraphics
 
 /// Captures the microphone with a single AVAudioEngine that does three jobs at
-/// once: writes a WAV file for the final OpenAI Whisper pass, feeds Apple's
+/// once: writes a WAV file for the final local Whisper pass, feeds Apple's
 /// on-device SFSpeechRecognizer for a live preview, and emits an audio level for
 /// the waveform / orb animation. The live preview is best-effort — if Speech
 /// isn't authorized the file + level path still works.
@@ -94,7 +94,7 @@ final class AudioCapture {
     }
 
     /// One-shot on-device/server recognition of a recorded file — used as the
-    /// final transcription when no OpenAI key is set. Returns nil if speech
+    /// final transcription fallback. Returns nil if speech
     /// recognition isn't authorized or available.
     static func recognizeFile(_ url: URL,
                               localeIdentifier: String,

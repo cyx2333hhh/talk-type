@@ -6,11 +6,13 @@ import Combine
 enum Keys {
     static let chatModel = "chatModel"
     static let language = "language"
+    static let recognitionEngine = "recognitionEngine"
     static let recognitionContext = "recognitionContext"
     static let enableBilingualRecognition = "enableBilingualRecognition"
     static let bilingualRecognitionSafetyReset = "bilingualRecognitionSafetyReset"
     static let enableCorrection = "enableCorrection"
     static let enableLivePreview = "enableLivePreview"
+    static let useInputContext = "useInputContext"
     static let useFnKey = "useFnKey"
     static let hotKeyCode = "hotKeyCode"
     static let hotKeyMods = "hotKeyMods"
@@ -18,6 +20,7 @@ enum Keys {
     static let historyData = "historyData"
 
     static let defaultRecognitionContext = """
+    Murmur
     DeepSeek
     ChatGPT
     GPT
@@ -67,10 +70,12 @@ enum Keys {
         UserDefaults.standard.register(defaults: [
             chatModel: "deepseek-chat",
             language: "zh",
+            recognitionEngine: "whisper",
             recognitionContext: defaultRecognitionContext,
             enableBilingualRecognition: false,
             enableCorrection: true,
             enableLivePreview: true,
+            useInputContext: true,
             useFnKey: true,
             hotKeyCode: 49,        // Space (used when not in fn mode)
             hotKeyMods: 6144,      // control(4096) + option(2048)
@@ -123,6 +128,7 @@ final class AppState: ObservableObject {
     private var clockTimer: Timer?
     private var hideTask: Task<Void, Never>?
     private var isStarting = false
+    private var capturedInputContext = FocusedTextContext.empty
 
     private lazy var panel = PanelController(
         content: AnyView(RecordingOverlayView().environmentObject(self)),
@@ -186,11 +192,17 @@ final class AppState: ObservableObject {
     private var language: String {
         UserDefaults.standard.string(forKey: Keys.language) ?? ""
     }
+    private var recognitionEngine: String {
+        UserDefaults.standard.string(forKey: Keys.recognitionEngine) ?? "whisper"
+    }
     private var correctionEnabled: Bool {
         UserDefaults.standard.bool(forKey: Keys.enableCorrection)
     }
     private var livePreviewEnabled: Bool {
         UserDefaults.standard.bool(forKey: Keys.enableLivePreview)
+    }
+    private var inputContextEnabled: Bool {
+        UserDefaults.standard.bool(forKey: Keys.useInputContext)
     }
     private var bilingualRecognitionEnabled: Bool {
         UserDefaults.standard.bool(forKey: Keys.enableBilingualRecognition)
@@ -249,6 +261,9 @@ final class AppState: ObservableObject {
         errorMessage = nil
         partialText = ""
         hideTask?.cancel()
+        capturedInputContext = inputContextEnabled
+            ? TextInserter.focusedTextContext()
+            : .empty
         panel.show()
 
         guard await AudioCapture.ensureMicPermission() else {
@@ -256,9 +271,18 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Apple's on-device recognition is the transcription engine, so it's
-        // always needed (DeepSeek only does the text cleanup afterwards).
-        let speechGranted = await AudioCapture.ensureSpeechPermission()
+        let whisperReady = recognitionEngine == "whisper" && LocalWhisperTranscriber.isAvailable
+        let speechIsRequired = !whisperReady
+        let speechGranted: Bool
+        if livePreviewEnabled || speechIsRequired {
+            speechGranted = await AudioCapture.ensureSpeechPermission()
+        } else {
+            speechGranted = AudioCapture.speechAuthorized()
+        }
+        guard !speechIsRequired || speechGranted else {
+            fail("当前识别引擎不可用，且未获得「语音识别」权限。请在设置中检查识别引擎和权限。")
+            return
+        }
 
         do {
             try capture.start(livePreview: speechGranted && livePreviewEnabled,
@@ -283,16 +307,41 @@ final class AppState: ObservableObject {
         }
         defer { try? FileManager.default.removeItem(at: url) }
 
-        // 1) Transcribe locally with Apple's recognizer.
+        let inputContext = capturedInputContext
+        capturedInputContext = .empty
+
+        // 1) Prefer local Whisper Small for mixed Chinese/English, with Apple
+        // Speech as a fallback and as the live-preview engine.
         phase = .transcribing
         let contextualStrings = recognitionContextTerms
-        let recognized = await AudioCapture.recognizeFile(url,
-                                                          localeIdentifier: recognitionLocale,
-                                                          contextualStrings: [])
+        var usedWhisper = false
+        var recognized: String?
+
+        if recognitionEngine == "whisper", LocalWhisperTranscriber.isAvailable {
+            recognized = await LocalWhisperTranscriber.transcribe(url,
+                                                                  language: language,
+                                                                  vocabulary: contextualStrings,
+                                                                  inputContext: inputContext)
+            usedWhisper = !(recognized ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        }
+
+        if !usedWhisper {
+            var speechGranted = AudioCapture.speechAuthorized()
+            if !speechGranted {
+                speechGranted = await AudioCapture.ensureSpeechPermission()
+            }
+            if speechGranted {
+                recognized = await AudioCapture.recognizeFile(url,
+                                                              localeIdentifier: recognitionLocale,
+                                                              contextualStrings: [])
+            }
+        }
 
         let raw = (recognized ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
-            fail("没有识别到内容。请确认已开启「语音识别」权限后重试。")
+            fail("没有识别到内容。请靠近麦克风后重试，或在设置中检查识别引擎。")
             return
         }
 
@@ -301,7 +350,7 @@ final class AppState: ObservableObject {
         let key = KeychainHelper.load() ?? ""
         if correctionEnabled, !key.isEmpty {
             let englishAssist: String?
-            if shouldRunEnglishAssist {
+            if shouldRunEnglishAssist && !usedWhisper {
                 englishAssist = await AudioCapture.recognizeFile(url,
                                                                  localeIdentifier: "en-US",
                                                                  contextualStrings: contextualStrings)?
@@ -314,9 +363,12 @@ final class AppState: ObservableObject {
             if let cleaned = try? await DeepSeekClient(apiKey: key).correct(raw,
                                                                             model: chatModel,
                                                                             contextualStrings: contextualStrings,
-                                                                            englishTranscript: englishAssist),
+                                                                            englishTranscript: englishAssist,
+                                                                            inputContext: inputContext),
                !cleaned.isEmpty,
-               AppState.shouldAcceptCorrectedText(raw: raw, cleaned: cleaned) {
+               AppState.shouldAcceptCorrectedText(raw: raw,
+                                                  cleaned: cleaned,
+                                                  inputContext: inputContext) {
                 text = cleaned
             }
         }
@@ -397,9 +449,14 @@ final class AppState: ObservableObject {
             }
     }
 
-    private static func shouldAcceptCorrectedText(raw: String, cleaned: String) -> Bool {
+    private static func shouldAcceptCorrectedText(raw: String,
+                                                  cleaned: String,
+                                                  inputContext: FocusedTextContext = .empty) -> Bool {
         let rawSignal = signalCharacterCount(raw)
         let cleanedSignal = signalCharacterCount(cleaned)
+        if rawSignal >= 8, cleanedSignal > rawSignal + max(18, rawSignal / 2) {
+            return false
+        }
         if rawSignal >= 18, cleanedSignal < Int(Double(rawSignal) * 0.68) {
             return false
         }
@@ -407,6 +464,9 @@ final class AppState: ObservableObject {
             return false
         }
         if !preservesDigitRuns(raw: raw, cleaned: cleaned) {
+            return false
+        }
+        if repeatsInputContext(raw: raw, cleaned: cleaned, inputContext: inputContext) {
             return false
         }
 
@@ -425,13 +485,35 @@ final class AppState: ObservableObject {
         return true
     }
 
+    private static func repeatsInputContext(raw: String,
+                                            cleaned: String,
+                                            inputContext: FocusedTextContext) -> Bool {
+        guard !inputContext.isEmpty else { return false }
+        let normalizedRaw = signalText(raw)
+        let normalizedCleaned = signalText(cleaned)
+        let contextSamples = [
+            String(signalText(inputContext.beforeCursor).suffix(28)),
+            String(signalText(inputContext.afterCursor).prefix(28)),
+        ]
+
+        return contextSamples.contains { sample in
+            sample.count >= 10
+                && normalizedCleaned.contains(sample)
+                && !normalizedRaw.contains(sample)
+        }
+    }
+
     private static func signalCharacterCount(_ text: String) -> Int {
-        text.unicodeScalars.filter {
+        signalText(text).count
+    }
+
+    private static func signalText(_ text: String) -> String {
+        String(text.lowercased().unicodeScalars.filter {
             (0x4E00...0x9FFF).contains($0.value)
                 || (0x41...0x5A).contains($0.value)
                 || (0x61...0x7A).contains($0.value)
                 || (0x30...0x39).contains($0.value)
-        }.count
+        })
     }
 
     private static func preservesDigitRuns(raw: String, cleaned: String) -> Bool {
@@ -472,6 +554,7 @@ final class AppState: ObservableObject {
 
     private func fail(_ message: String) {
         stopClock()
+        capturedInputContext = .empty
         errorMessage = message
         phase = .failed
         scheduleHide(after: 2.4)

@@ -9,10 +9,12 @@ struct SettingsView: View {
 
     @AppStorage(Keys.chatModel) private var chatModel = "deepseek-chat"
     @AppStorage(Keys.language) private var language = "zh"
+    @AppStorage(Keys.recognitionEngine) private var recognitionEngine = "whisper"
     @AppStorage(Keys.recognitionContext) private var recognitionContext = Keys.defaultRecognitionContext
     @AppStorage(Keys.enableBilingualRecognition) private var enableBilingualRecognition = false
     @AppStorage(Keys.enableCorrection) private var enableCorrection = true
     @AppStorage(Keys.enableLivePreview) private var enableLivePreview = true
+    @AppStorage(Keys.useInputContext) private var useInputContext = true
     @AppStorage(Keys.hotKeyDisplay) private var hotKeyDisplay = "⌃⌥Space"
 
     @State private var apiKey = ""
@@ -93,15 +95,37 @@ struct SettingsView: View {
 
     private var modelSection: some View {
         section("识别与整理") {
+            HStack {
+                Text("识别引擎")
+                    .font(.system(size: 12.5))
+                Spacer()
+                Picker("", selection: $recognitionEngine) {
+                    Text("Whisper Small（中英混合）").tag("whisper")
+                    Text("Apple Speech（轻量）").tag("apple")
+                }
+                .labelsHidden()
+                .frame(width: 220)
+            }
+            Text(whisperStatusText)
+                .font(.caption2)
+                .foregroundStyle(LocalWhisperTranscriber.isAvailable ? Color.secondary : Color.orange)
             labeledField("整理模型", text: $chatModel,
                          hint: "DeepSeek 模型：deepseek-chat（默认）或 deepseek-reasoner")
             labeledField("语言", text: $language,
-                         hint: "本地识别语言；留空为自动，中文填 zh，英文填 en-US")
+                         hint: "中文为主的中英混合建议填 zh；纯英文填 en，留空为自动判断")
             vocabularyField
-            Toggle("实验：额外跑英文识别（默认关闭，避免中文被误改成英文）",
-                   isOn: $enableBilingualRecognition)
+            if recognitionEngine == "apple" {
+                Toggle("实验：额外跑英文识别（默认关闭，避免中文被误改成英文）",
+                       isOn: $enableBilingualRecognition)
+                    .font(.system(size: 12.5))
+                Text("仅在中文主识别里有明显英文词但识别很差时再手动开启；中文主识别始终优先。")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Toggle("参考光标附近文本，匹配格式、语气和术语",
+                   isOn: $useInputContext)
                 .font(.system(size: 12.5))
-            Text("仅在中文主识别里有明显英文词但识别很差时再手动开启；中文主识别始终优先。")
+            Text("只读取光标前后最多 800 字，本次输入结束后立即清除；启用 DeepSeek 时，该片段会随本次整理请求发送。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             Toggle("用 DeepSeek 智能整理 / 纠错（自动排版、断句、去口水词、纠正表达）",
@@ -124,10 +148,17 @@ struct SettingsView: View {
                         .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
                 )
                 .frame(height: 86)
-            Text("每行或用逗号分隔一个英文词/专名；用于 DeepSeek 整理参考，不再直接干预 Apple 中文识别。")
+            Text("每行或用逗号分隔一个英文词/专名；Whisper 只读取前 24 个作为弱提示，DeepSeek 可读取前 80 个用于纠错。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    private var whisperStatusText: String {
+        if LocalWhisperTranscriber.isAvailable {
+            return "Whisper Small 已安装并优先用于最终转写；Apple Speech 继续提供实时预览和自动回退。"
+        }
+        return "未检测到 Whisper Small 或 whisper.cpp，将自动回退到 Apple Speech。"
     }
 
     // MARK: - Appearance & experience

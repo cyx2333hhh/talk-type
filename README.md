@@ -26,25 +26,27 @@
 
 ## English
 
-Murmur lives in your menu bar and Dock. Press a hotkey, speak, press it again — Murmur transcribes your speech **on‑device** with Apple's recognizer and, if you add a DeepSeek key, **tidies it up** (punctuation, paragraphs, removing filler words, fixing slips) before inserting it wherever your cursor is.
+Murmur lives in your menu bar and Dock. Press a hotkey, speak, press it again — Murmur transcribes your speech **on-device** with local Whisper Small when installed (Apple Speech is the fallback) and, if you add a DeepSeek key, **tidies it up** before inserting it wherever your cursor is.
 
 No subscription, no account required, and your **audio never leaves your Mac**.
 
 ### Features
 
-- 🎙️ **On‑device transcription** — Apple `SFSpeechRecognizer`. Free, offline, private. Works out of the box with no API key.
+- 🎙️ **On-device transcription** — local Whisper Small is preferred for mixed Chinese/English; Apple `SFSpeechRecognizer` provides live preview and automatic fallback. No API key is required.
+- 🧩 **Context-aware dictation** — optionally reads up to 800 characters around the cursor to match formatting, tone and terminology. The context is held only for the current dictation.
 - ✨ **Optional AI cleanup** — add a [DeepSeek](https://platform.deepseek.com) key to auto‑punctuate, paragraph, de‑filler and fix expression. The key is **optional** and stored only in the macOS Keychain.
 - ⌨️ **Global hotkey** — default is the **fn / 🌐** key; tap to start, tap to stop. Re‑bindable to any shortcut.
 - 📋 **Inserts at the cursor** — auto‑pastes into any app, with a one‑tap **Copy** fallback when a paste lands in the wrong place.
 - 🪟 **Real UI** — menu‑bar popover **and** a main window with a Dock icon (so it's reachable even when the menu bar is crowded behind the notch).
 - 〰️ **Live preview + flowing waveform** — see words appear as you speak, in a small, refined frosted pill.
 - 🕘 **Recent history** — your last dictations, each copyable.
-- 🔒 **Privacy‑first** — audio stays local; only the recognized *text* is sent to DeepSeek, and only if you opt in.
+- 🔒 **Privacy-first** — audio stays local. If DeepSeek cleanup is enabled, the transcript and optional cursor context are sent for that request; both context capture and cleanup can be disabled.
 
 ### Requirements
 
 - macOS 14 (Sonoma) or later
 - Xcode 16+ to build
+- *(recommended for mixed Chinese/English)* `whisper-cli` from whisper.cpp plus `ggml-small.bin` at `~/Library/Application Support/Murmur/Models/ggml-small.bin`
 - *(optional)* a DeepSeek API key for the cleanup pass
 
 ### Build & run
@@ -78,38 +80,41 @@ Put your cursor in any text field → press **fn** → speak → press **fn** ag
 ### How it works
 
 ```
-fn / record button → record (.wav) → Apple on‑device speech‑to‑text
-                                    → [optional] DeepSeek tidy‑up
+fn / record button → record (.wav) → local Whisper Small
+                                    → Apple Speech fallback + live preview
+                                    → [optional] DeepSeek tidy-up with cursor context
                                     → clipboard + synthesized ⌘V → restore clipboard
 ```
 
 ### Tech
 
-Native SwiftUI + AppKit. Local speech via `SFSpeechRecognizer`; text cleanup via DeepSeek's OpenAI‑compatible chat API. The app icon and menu‑bar glyphs are generated programmatically with CoreGraphics — edit `Murmur-icongen.swift` and run `swift Murmur-icongen.swift` to regenerate.
+Native SwiftUI + AppKit. Final local transcription prefers whisper.cpp with Whisper Small; `SFSpeechRecognizer` powers live preview and fallback. Text cleanup uses DeepSeek's OpenAI-compatible chat API. The app icon and menu-bar glyphs are generated programmatically with CoreGraphics — edit `Murmur-icongen.swift` and run `swift Murmur-icongen.swift` to regenerate.
 
 ---
 
 ## 中文
 
-Murmur 常驻菜单栏和 Dock。按一下快捷键、说话、再按一下 —— Murmur 用苹果识别引擎在**本机**把语音转成文字;如果你填了 DeepSeek 密钥,它还会**自动整理**(加标点、分段、去口水词、纠正口误),然后插入到你光标所在的任何位置。
+Murmur 常驻菜单栏和 Dock。按一下快捷键、说话、再按一下 —— Murmur 优先用本地 Whisper Small 把语音转成文字(Apple Speech 自动回退);如果你填了 DeepSeek 密钥,它还会自动整理后插入到光标位置。
 
 无需订阅、无需账号,而且**音频不会离开你的 Mac**。
 
 ### 功能
 
-- 🎙️ **本地转写** —— 苹果 `SFSpeechRecognizer`,免费、离线、隐私好。**不填任何 Key 也能直接用。**
+- 🎙️ **本地转写** —— 中英混合优先使用本地 Whisper Small;苹果 `SFSpeechRecognizer` 负责实时预览和自动回退。**不填任何 Key 也能直接用。**
+- 🧩 **上下文感知** —— 可读取光标前后最多 800 字,匹配既有格式、语气和术语;上下文只保留到本次输入结束。
 - ✨ **可选 AI 整理** —— 填入 [DeepSeek](https://platform.deepseek.com) 密钥即可自动断句、分段、去口水词、纠正表达。密钥**可选**,且只存在系统钥匙串里。
 - ⌨️ **全局快捷键** —— 默认 **fn / 🌐** 键,按一下开始、再按一下停止;可改成任意组合键。
 - 📋 **插入到光标处** —— 自动粘贴进任何 App;万一落点不准,还有一键**复制**兜底。
 - 🪟 **真正的界面** —— 菜单栏弹窗 **+** 带 Dock 图标的主窗口(刘海屏菜单栏被挤满时也找得到)。
 - 〰️ **实时预览 + 流动声纹** —— 边说边出字,配小巧克制的毛玻璃胶囊。
 - 🕘 **最近记录** —— 保留最近的转写结果,每条都能复制。
-- 🔒 **隐私优先** —— 音频只在本地;只有识别出的**文本**才会(在你选择开启时)发给 DeepSeek。
+- 🔒 **隐私优先** —— 音频只在本地。启用 DeepSeek 整理时,本次转写和可选的光标上下文会随请求发送;上下文读取和 DeepSeek 均可关闭。
 
 ### 环境要求
 
 - macOS 14(Sonoma)及以上
 - 构建需 Xcode 16+
+- *(推荐用于中英混合)* 安装 whisper.cpp 的 `whisper-cli`,并把 `ggml-small.bin` 放在 `~/Library/Application Support/Murmur/Models/ggml-small.bin`
 - *(可选)* DeepSeek API 密钥(用于整理环节)
 
 ### 构建与运行
@@ -143,14 +148,15 @@ xcodebuild -project Murmur.xcodeproj -target Murmur CODE_SIGNING_ALLOWED=NO buil
 ### 工作原理
 
 ```
-fn / 录音按钮 → 录音(.wav) → 苹果本地语音转文字
-                            → (可选) DeepSeek 整理润色
+fn / 录音按钮 → 录音(.wav) → 本地 Whisper Small
+                            → Apple Speech 回退 + 实时预览
+                            → (可选)结合光标上下文的 DeepSeek 整理
                             → 写入剪贴板 + 模拟 ⌘V → 还原剪贴板
 ```
 
 ### 技术
 
-原生 SwiftUI + AppKit。本地语音用 `SFSpeechRecognizer`;文本整理用 DeepSeek 的 OpenAI 兼容对话 API。App 图标与菜单栏图标由 CoreGraphics 脚本程序化生成 —— 改 `Murmur-icongen.swift` 后跑 `swift Murmur-icongen.swift` 即可重新生成。
+原生 SwiftUI + AppKit。最终转写优先使用 whisper.cpp + Whisper Small;`SFSpeechRecognizer` 负责实时预览与回退;文本整理使用 DeepSeek 的 OpenAI 兼容对话 API。App 图标与菜单栏图标由 CoreGraphics 脚本程序化生成 —— 改 `Murmur-icongen.swift` 后跑 `swift Murmur-icongen.swift` 即可重新生成。
 
 ### 许可证
 
