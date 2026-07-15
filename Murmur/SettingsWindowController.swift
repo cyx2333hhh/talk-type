@@ -17,9 +17,12 @@ final class SettingsWindowController {
                 rootView: SettingsView().environmentObject(AppState.shared)
             )
             let w = NSWindow(contentViewController: host)
-            w.title = "Murmur 设置"
-            w.styleMask = [.titled, .closable, .miniaturizable]
-            w.setContentSize(NSSize(width: 460, height: 600))
+            w.title = "Talk-type 设置"
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            w.setContentSize(NSSize(width: 720, height: 580))
+            w.minSize = NSSize(width: 680, height: 540)
             w.isReleasedWhenClosed = false
             w.center()
             window = w

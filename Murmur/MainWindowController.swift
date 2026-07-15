@@ -15,17 +15,17 @@ final class MainWindowController {
     func show() {
         if window == nil {
             let host = NSHostingController(
-                rootView: HomeView().environmentObject(AppState.shared)
+                rootView: HomeView(presentation: .mainWindow)
+                    .environmentObject(AppState.shared)
             )
             let w = NSWindow(contentViewController: host)
-            w.title = "Murmur"
-            w.styleMask = [.titled, .closable, .miniaturizable]
+            w.title = "Talk-type"
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            w.setContentSize(NSSize(width: 620, height: 600))
+            w.minSize = NSSize(width: 560, height: 540)
             w.isReleasedWhenClosed = false
-            host.view.layoutSubtreeIfNeeded()
-            let fittingSize = host.view.fittingSize
-            if fittingSize.width > 0, fittingSize.height > 0 {
-                w.setContentSize(fittingSize)
-            }
             window = w
         }
         if let window {
@@ -33,6 +33,10 @@ final class MainWindowController {
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        let currentWindow = window
+        DispatchQueue.main.async {
+            currentWindow?.makeFirstResponder(nil)
+        }
     }
 
     private func centerOnMainScreen(_ window: NSWindow) {

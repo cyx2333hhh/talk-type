@@ -56,8 +56,17 @@ enum LocalWhisperTranscriber {
     }
 
     private static var modelURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Murmur/Models/ggml-small.bin")
+        let applicationSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support")
+        let current = applicationSupport
+            .appendingPathComponent("Talk-type/Models/ggml-small.bin")
+        if FileManager.default.fileExists(atPath: current.path) {
+            return current
+        }
+
+        // Keep existing model downloads working after the product rename.
+        return applicationSupport
+            .appendingPathComponent("Murmur/Models/ggml-small.bin")
     }
 
     private static var executableURL: URL? {

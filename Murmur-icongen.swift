@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-// Generates the Murmur app icon (full macOS size set) and custom menu-bar
+// Generates the Talk-type app icon (full macOS size set) and custom menu-bar
 // template glyphs into Murmur/Assets.xcassets. Run with: swift Murmur-icongen.swift
 // This file lives OUTSIDE the Murmur source folder so it is never compiled into the app.
 
@@ -9,6 +9,7 @@ let assetsRoot = FileManager.default.currentDirectoryPath + "/Murmur/Assets.xcas
 let appIconSet = "\(assetsRoot)/AppIcon.appiconset"
 let menuIdleSet = "\(assetsRoot)/MenuBarIcon.imageset"
 let menuActiveSet = "\(assetsRoot)/MenuBarIconActive.imageset"
+let docsIcon = FileManager.default.currentDirectoryPath + "/docs/icon.png"
 
 let fm = FileManager.default
 for dir in [assetsRoot, appIconSet, menuIdleSet, menuActiveSet] {
@@ -29,68 +30,159 @@ func render(_ pixels: Int, _ draw: (CGContext, CGFloat) -> Void) -> Data {
     return rep.representation(using: .png, properties: [:])!
 }
 
-func roundedBar(_ cg: CGContext, x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat) {
-    let r = CGRect(x: x, y: y, width: w, height: h)
-    cg.addPath(CGPath(roundedRect: r, cornerWidth: w / 2, cornerHeight: w / 2, transform: nil))
-    cg.fillPath()
+func color(_ hex: UInt32, alpha: CGFloat = 1) -> NSColor {
+    NSColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255,
+            green: CGFloat((hex >> 8) & 0xff) / 255,
+            blue: CGFloat(hex & 0xff) / 255,
+            alpha: alpha)
+}
+
+func talkTracePath(centerX: CGFloat,
+                   centerY: CGFloat,
+                   halfWidth: CGFloat,
+                   amplitude: CGFloat) -> CGPath {
+    let path = CGMutablePath()
+    path.move(to: CGPoint(x: centerX - halfWidth, y: centerY))
+    path.addCurve(to: CGPoint(x: centerX, y: centerY),
+                  control1: CGPoint(x: centerX - halfWidth * 0.66,
+                                    y: centerY + amplitude),
+                  control2: CGPoint(x: centerX - halfWidth * 0.34,
+                                    y: centerY - amplitude))
+    path.addCurve(to: CGPoint(x: centerX + halfWidth, y: centerY),
+                  control1: CGPoint(x: centerX + halfWidth * 0.34,
+                                    y: centerY + amplitude),
+                  control2: CGPoint(x: centerX + halfWidth * 0.66,
+                                    y: centerY - amplitude))
+    return path
 }
 
 // MARK: - App icon
 
 func drawAppIcon(_ cg: CGContext, _ s: CGFloat) {
-    let inset = s * 0.08
+    let inset = s * 0.068
     let rect = CGRect(x: inset, y: inset, width: s - 2 * inset, height: s - 2 * inset)
     let radius = rect.width * 0.2237
     let shape = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 
-    // Soft drop shadow.
+    // A restrained macOS tile: graphite with a precise rim and deep soft shadow.
     cg.saveGState()
     cg.setShadow(offset: CGSize(width: 0, height: -s * 0.012),
-                 blur: s * 0.035,
-                 color: NSColor.black.withAlphaComponent(0.28).cgColor)
+                 blur: s * 0.042,
+                 color: NSColor.black.withAlphaComponent(0.34).cgColor)
     cg.addPath(shape)
     cg.setFillColor(NSColor.white.cgColor)
     cg.fillPath()
     cg.restoreGState()
 
-    // Flat pure-black fill.
     cg.saveGState()
     cg.addPath(shape)
     cg.clip()
-    cg.setFillColor(NSColor.black.cgColor)
-    cg.fill(rect)
+
+    let background = CGGradient(
+        colorsSpace: CGColorSpaceCreateDeviceRGB(),
+        colors: [color(0x090C0D).cgColor, color(0x242A2A).cgColor] as CFArray,
+        locations: [0, 1]
+    )!
+    cg.drawLinearGradient(background,
+                          start: CGPoint(x: rect.midX, y: rect.minY),
+                          end: CGPoint(x: rect.midX, y: rect.maxY),
+                          options: [])
     cg.restoreGState()
 
-    // White waveform bars.
-    let heights: [CGFloat] = [0.30, 0.58, 0.86, 0.50, 0.34]
-    let barW = rect.width * 0.078
-    let gap = barW * 0.78
-    let total = CGFloat(heights.count) * barW + CGFloat(heights.count - 1) * gap
-    var x = rect.midX - total / 2
-    cg.setFillColor(NSColor.white.cgColor)
-    for f in heights {
-        let h = rect.height * f
-        roundedBar(cg, x: x, y: rect.midY - h / 2, w: barW, h: h)
-        x += barW + gap
-    }
+    // Hairline rim, visible only where the light meets the graphite.
+    cg.saveGState()
+    cg.addPath(shape)
+    cg.setStrokeColor(NSColor.white.withAlphaComponent(0.13).cgColor)
+    cg.setLineWidth(max(1, s * 0.0022))
+    cg.strokePath()
+    cg.restoreGState()
+
+    let tCenterX = rect.midX
+    let crownY = rect.midY + rect.height * 0.15
+    let stemBottom = rect.midY - rect.height * 0.28
+    let slant: CGFloat = 0.025
+
+    // A quiet voice trace and insertion cursor form the letter T.
+    cg.saveGState()
+    cg.translateBy(x: tCenterX, y: stemBottom)
+    cg.concatenate(CGAffineTransform(a: 1, b: 0, c: slant, d: 1, tx: 0, ty: 0))
+    cg.translateBy(x: -tCenterX, y: -stemBottom)
+
+    let crown = talkTracePath(centerX: tCenterX,
+                              centerY: crownY,
+                              halfWidth: rect.width * 0.265,
+                              amplitude: rect.height * 0.028)
+
+    cg.setShadow(offset: CGSize(width: 0, height: -rect.width * 0.008),
+                 blur: rect.width * 0.018,
+                 color: NSColor.black.withAlphaComponent(0.30).cgColor)
+    cg.setStrokeColor(color(0xF3F6F4).cgColor)
+    cg.setLineWidth(rect.width * 0.062)
+    cg.setLineCap(.round)
+    cg.addPath(crown)
+    cg.strokePath()
+
+    let stemWidth = rect.width * 0.062
+    let stemTop = crownY + rect.height * 0.006
+    let stemRect = CGRect(x: tCenterX - stemWidth / 2,
+                          y: stemBottom,
+                          width: stemWidth,
+                          height: stemTop - stemBottom)
+    let stemPath = CGPath(roundedRect: stemRect,
+                          cornerWidth: stemWidth / 2,
+                          cornerHeight: stemWidth / 2,
+                          transform: nil)
+    cg.setShadow(offset: .zero,
+                 blur: rect.width * 0.030,
+                 color: color(0x5BCDB9, alpha: 0.22).cgColor)
+    cg.addPath(stemPath)
+    cg.setFillColor(color(0x65D7C3).cgColor)
+    cg.fillPath()
+
+    cg.addPath(stemPath)
+    cg.clip()
+    let stemGradient = CGGradient(
+        colorsSpace: CGColorSpaceCreateDeviceRGB(),
+        colors: [color(0x3DB9A6).cgColor, color(0xB4F3E8).cgColor] as CFArray,
+        locations: [0, 1]
+    )!
+    cg.drawLinearGradient(stemGradient,
+                          start: CGPoint(x: stemRect.midX, y: stemRect.minY),
+                          end: CGPoint(x: stemRect.midX, y: stemRect.maxY),
+                          options: [])
+    cg.restoreGState()
 }
 
 // MARK: - Menu bar template glyph
 
 func drawMenuGlyph(_ cg: CGContext, _ s: CGFloat, active: Bool) {
-    let heights: [CGFloat] = active ? [0.45, 0.78, 1.0, 0.66, 0.5]
-                                    : [0.34, 0.60, 0.86, 0.54, 0.40]
-    let barW = s * 0.115
-    let gap = barW * 0.78
-    let total = CGFloat(heights.count) * barW + CGFloat(heights.count - 1) * gap
-    var x = (s - total) / 2
-    let maxH = s * 0.82
-    cg.setFillColor(NSColor.black.cgColor) // template: tinted by the system
-    for f in heights {
-        let h = maxH * f
-        roundedBar(cg, x: x, y: (s - h) / 2, w: barW, h: h)
-        x += barW + gap
-    }
+    let centerX = s / 2
+    let crownY = s * 0.65
+    let crown = talkTracePath(centerX: centerX,
+                              centerY: crownY,
+                              halfWidth: s * 0.32,
+                              amplitude: s * (active ? 0.065 : 0.035))
+    let ink = NSColor.black
+
+    cg.saveGState()
+    cg.setStrokeColor(ink.cgColor)
+    cg.setLineWidth(max(1.4, s * (active ? 0.092 : 0.084)))
+    cg.setLineCap(.round)
+    cg.addPath(crown)
+    cg.strokePath()
+
+    let stemWidth = max(1.4, s * (active ? 0.10 : 0.09))
+    let stemRect = CGRect(x: centerX - stemWidth / 2,
+                          y: s * (active ? 0.13 : 0.16),
+                          width: stemWidth,
+                          height: crownY - s * (active ? 0.12 : 0.15))
+    cg.addPath(CGPath(roundedRect: stemRect,
+                      cornerWidth: stemWidth / 2,
+                      cornerHeight: stemWidth / 2,
+                      transform: nil))
+    cg.setFillColor(ink.cgColor)
+    cg.fillPath()
+    cg.restoreGState()
 }
 
 // MARK: - Write app icon set
@@ -114,6 +206,9 @@ for e in entries {
     let name = "icon_\(e.size)_\(e.scale).png"
     let data = render(e.px) { cg, s in drawAppIcon(cg, s) }
     try! data.write(to: URL(fileURLWithPath: "\(appIconSet)/\(name)"))
+    if e.px == 1024 {
+        try! data.write(to: URL(fileURLWithPath: docsIcon))
+    }
     images.append(["idiom": "mac", "size": e.size, "scale": e.scale, "filename": name])
 }
 func writeContents(_ dir: String, images: [[String: String]], extra: [String: Any] = [:]) {

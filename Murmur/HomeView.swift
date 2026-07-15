@@ -1,174 +1,211 @@
 import SwiftUI
 
-/// The main interface, shown as a refined panel when the menu-bar icon is
-/// clicked: a large record button, live status, and recent dictations.
+enum HomePresentation {
+    case mainWindow
+    case menuBar
+}
+
 struct HomeView: View {
     @EnvironmentObject var app: AppState
 
+    let presentation: HomePresentation
+
+    init(presentation: HomePresentation = .mainWindow) {
+        self.presentation = presentation
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider().opacity(0.5)
-            hero
-            Divider().opacity(0.5)
-            recent
+            AppHeader(compact: presentation == .menuBar)
+            DictationStage(compact: presentation == .menuBar)
+            RecentSection(compact: presentation == .menuBar)
         }
-        .frame(width: 340)
+        .frame(minWidth: presentation == .mainWindow ? 560 : nil,
+               idealWidth: presentation == .mainWindow ? 620 : 360,
+               maxWidth: presentation == .mainWindow ? .infinity : 360,
+               minHeight: presentation == .mainWindow ? 540 : nil,
+               maxHeight: presentation == .mainWindow ? .infinity : nil)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .tint(MurmurPalette.accent)
     }
+}
 
-    // MARK: - Header
+private struct AppHeader: View {
+    @EnvironmentObject var app: AppState
+    let compact: Bool
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "waveform")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Murmur")
-                    .font(.system(size: 15, weight: .semibold))
-                Text("语音输入")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+    var body: some View {
+        HStack(spacing: 11) {
+            VoiceCursorSymbol(level: app.audioLevel,
+                              active: app.phase == .recording)
+                .frame(width: compact ? 25 : 28, height: compact ? 25 : 28)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Talk-type")
+                    .font(.system(size: compact ? 14.5 : 16,
+                                  weight: .semibold))
+                if compact {
+                    Text("本地语音输入")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                } else {
+                    EngineStatusLabel()
+                }
             }
+
             Spacer(minLength: 12)
-            headerActions
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
 
-    private var headerActions: some View {
-        HStack(spacing: 8) {
-            Button {
-                SettingsWindowController.shared.show()
-            } label: {
-                headerActionIcon("gearshape")
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .help("设置")
-            .accessibilityLabel("设置")
-
-            Menu {
-                Button("设置…") { SettingsWindowController.shared.show() }
-                Divider()
-                Button("退出 Murmur") { NSApp.terminate(nil) }
-            } label: {
-                headerActionIcon("ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 28, height: 28)
-            .focusable(false)
-            .help("更多")
-            .accessibilityLabel("更多")
-        }
-        .fixedSize()
-    }
-
-    private func headerActionIcon(_ systemName: String) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(.primary)
-            .frame(width: 28, height: 28)
-            .contentShape(Rectangle())
-    }
-
-    // MARK: - Hero
-
-    private var hero: some View {
-        VStack(spacing: 14) {
-            RecordButton(phase: app.phase) { app.toggle() }
-            VStack(spacing: 3) {
-                Text(statusText)
-                    .font(.system(size: 13.5, weight: .medium))
-                    .contentTransition(.opacity)
-                Text(hintText)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 26)
-    }
-
-    private var statusText: String {
-        switch app.phase {
-        case .idle:         return "准备就绪"
-        case .recording:    return "聆听中 · \(timeString(app.recordingSeconds))"
-        case .transcribing: return "转写中…"
-        case .correcting:   return "智能整理…"
-        case .inserting:    return "正在插入…"
-        case .success:      return app.lastResultPasted ? "已插入" : "已复制到剪贴板"
-        case .failed:       return app.errorMessage ?? "出错了"
-        }
-    }
-
-    private var hintText: String {
-        switch app.phase {
-        case .recording: return "再次按下 \(app.hotKeyDisplay) 或点按结束"
-        default:         return "按 \(app.hotKeyDisplay) 或点按上方开始"
-        }
-    }
-
-    // MARK: - Recent
-
-    private var recent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Label("最近记录", systemImage: "clock.arrow.circlepath")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if !app.history.isEmpty {
-                    Button {
-                        app.clearHistory()
-                    } label: {
-                        Text("清空")
-                            .font(.system(size: 11.5, weight: .medium))
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .help("清空最近记录")
+            HStack(spacing: 8) {
+                HeaderIconButton(systemName: "gearshape", help: "设置") {
+                    SettingsWindowController.shared.show()
                 }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
 
-            if app.history.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(app.history.prefix(8)) { record in
-                            HistoryRow(record: record) { app.deleteHistory(record) }
-                            if record.id != app.history.prefix(8).last?.id {
-                                Divider().opacity(0.4).padding(.leading, 16)
-                            }
-                        }
-                    }
+                Menu {
+                    Button("设置…") { SettingsWindowController.shared.show() }
+                    Divider()
+                    Button("退出 Talk-type") { NSApp.terminate(nil) }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxHeight: 260)
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 32, height: 32)
+                .focusable(false)
+                .help("更多")
+                .accessibilityLabel("更多")
             }
+            .fixedSize()
         }
-        .padding(.bottom, 6)
+        .padding(.horizontal, compact ? 16 : 22)
+        .padding(.vertical, compact ? 12 : 15)
     }
+}
 
-    private var emptyState: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "text.bubble")
-                .font(.system(size: 22))
-                .foregroundStyle(.tertiary)
-            Text("还没有记录")
-                .font(.system(size: 12.5))
+private struct EngineStatusLabel: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(LocalWhisperTranscriber.isAvailable
+                      ? MurmurPalette.accent
+                      : MurmurPalette.warning)
+                .frame(width: 5, height: 5)
+            Text(LocalWhisperTranscriber.isAvailable
+                 ? "WHISPER SMALL · 本地"
+                 : "APPLE SPEECH · 回退")
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
-            Text("按 \(app.hotKeyDisplay) 开始你的第一次语音输入")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct HeaderIconButton: View {
+    let systemName: String
+    let help: String
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(hovered ? .primary : .secondary)
+                .frame(width: 32, height: 32)
+                .background(hovered ? MurmurPalette.quietFill : .clear,
+                            in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { hovered = $0 }
+        .animation(MurmurMotion.quick, value: hovered)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+private struct DictationStage: View {
+    @EnvironmentObject var app: AppState
+    let compact: Bool
+
+    var body: some View {
+        VStack(spacing: compact ? 12 : 15) {
+            RecordControl(phase: app.phase,
+                          level: app.audioLevel,
+                          compact: compact) {
+                app.toggle()
+            }
+
+            VStack(spacing: 3) {
+                Text(statusTitle)
+                    .font(.system(size: compact ? 13.5 : 16, weight: .semibold))
+                    .contentTransition(.opacity)
+                Text(statusDetail)
+                    .font(.system(size: compact ? 11 : 11.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .contentTransition(.opacity)
+            }
+
+            stageFooter
+                .frame(height: compact ? 26 : 30)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 28)
+        .padding(.vertical, compact ? 20 : 25)
+        .background(MurmurPalette.quietFill)
+        .overlay(alignment: .top) { Divider().opacity(0.55) }
+        .overlay(alignment: .bottom) { Divider().opacity(0.55) }
+        .animation(MurmurMotion.state, value: app.phase)
+    }
+
+    @ViewBuilder private var stageFooter: some View {
+        if app.phase == .recording {
+            HStack(spacing: 11) {
+                VoiceTraceView(levels: app.levels, level: app.audioLevel)
+                    .frame(width: compact ? 150 : 210, height: 28)
+                Text(timeString(app.recordingSeconds))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+        } else {
+            HStack(spacing: 8) {
+                ShortcutKeyCap(text: app.hotKeyDisplay, compact: compact)
+                Text(app.phase == .success ? "再次输入" : "开始 / 停止")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var statusTitle: String {
+        switch app.phase {
+        case .idle: return "准备输入"
+        case .recording: return "正在聆听"
+        case .transcribing: return "正在本地转写"
+        case .correcting: return "正在匹配上下文"
+        case .inserting: return "正在插入"
+        case .success: return app.lastResultPasted ? "输入完成" : "已复制到剪贴板"
+        case .failed: return "本次输入未完成"
+        }
+    }
+
+    private var statusDetail: String {
+        switch app.phase {
+        case .idle: return "说完后再次按下快捷键"
+        case .recording: return "自然说话，中英文可以混合"
+        case .transcribing: return "Whisper Small 正在处理本地音频"
+        case .correcting: return "保留原意，仅优化格式与明确错误"
+        case .inserting: return "写入当前光标位置"
+        case .success: return app.lastResultPasted ? "文字已写入当前光标位置" : "可使用 ⌘V 手动粘贴"
+        case .failed: return app.errorMessage ?? "请重新尝试"
+        }
     }
 
     private func timeString(_ seconds: Int) -> String {
@@ -176,37 +213,35 @@ struct HomeView: View {
     }
 }
 
-/// The large circular record / stop button reflecting the current phase.
-private struct RecordButton: View {
+private struct RecordControl: View {
     let phase: Phase
+    let level: CGFloat
+    let compact: Bool
     let action: () -> Void
-    @State private var pulse = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovered = false
 
     var body: some View {
         Button(action: action) {
             ZStack {
                 Circle()
                     .fill(fill)
-                    .frame(width: 74, height: 74)
-
-                if phase == .recording {
-                    Circle()
-                        .stroke(Color.red.opacity(0.45), lineWidth: 3)
-                        .frame(width: 74, height: 74)
-                        .scaleEffect(pulse ? 1.28 : 1.0)
-                        .opacity(pulse ? 0 : 1)
-                }
-
-                icon
+                Circle()
+                    .strokeBorder(stroke, lineWidth: 0.8)
+                controlGlyph
             }
+            .frame(width: compact ? 66 : 76, height: compact ? 66 : 76)
+            .scaleEffect(hovered && !isBusy && !reduceMotion ? 1.025 : 1)
+            .shadow(color: shadowColor, radius: hovered ? 10 : 6, y: 3)
+            .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RecordPressStyle())
         .disabled(isBusy)
-        .onAppear {
-            withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) {
-                pulse = true
-            }
-        }
+        .onHover { hovered = $0 }
+        .animation(reduceMotion ? nil : MurmurMotion.quick, value: hovered)
+        .help(phase == .recording ? "停止录音" : "开始语音输入")
+        .accessibilityLabel(phase == .recording ? "停止录音" : "开始语音输入")
     }
 
     private var isBusy: Bool {
@@ -215,62 +250,176 @@ private struct RecordButton: View {
 
     private var fill: Color {
         switch phase {
-        case .recording: return Color.red.opacity(0.92)
-        case .failed:    return Color.orange.opacity(0.18)
-        default:         return Color.accentColor.opacity(0.14)
+        case .recording: return MurmurPalette.recording
+        case .success: return MurmurPalette.success.opacity(0.13)
+        case .failed: return MurmurPalette.warning.opacity(0.13)
+        default: return MurmurPalette.accent.opacity(0.12)
         }
     }
 
-    @ViewBuilder private var icon: some View {
+    private var stroke: Color {
+        switch phase {
+        case .recording: return Color.white.opacity(0.22)
+        case .success: return MurmurPalette.success.opacity(0.32)
+        case .failed: return MurmurPalette.warning.opacity(0.32)
+        default: return MurmurPalette.accent.opacity(hovered ? 0.46 : 0.28)
+        }
+    }
+
+    private var shadowColor: Color {
+        phase == .recording
+            ? MurmurPalette.recording.opacity(0.16)
+            : MurmurPalette.accent.opacity(hovered ? 0.12 : 0.06)
+    }
+
+    @ViewBuilder private var controlGlyph: some View {
         switch phase {
         case .recording:
-            Image(systemName: "stop.fill")
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(.white)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(.white)
+                .frame(width: compact ? 17 : 19, height: compact ? 17 : 19)
         case .transcribing, .correcting, .inserting:
-            ProgressView().controlSize(.small)
+            ProgressView()
+                .controlSize(compact ? .small : .regular)
+        case .success:
+            Image(systemName: "checkmark")
+                .font(.system(size: compact ? 21 : 24, weight: .semibold))
+                .foregroundStyle(MurmurPalette.success)
         case .failed:
             Image(systemName: "exclamationmark")
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(.orange)
+                .font(.system(size: compact ? 21 : 24, weight: .semibold))
+                .foregroundStyle(MurmurPalette.warning)
         default:
-            Image(systemName: "mic.fill")
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(.tint)
+            VoiceCursorSymbol(level: level)
+                .frame(width: compact ? 30 : 34, height: compact ? 30 : 34)
         }
     }
 }
 
-/// A single recent-dictation row with a copy button.
-private struct HistoryRow: View {
-    let record: DictationRecord
-    let onDelete: () -> Void
-    @State private var copied = false
+private struct RecordPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .animation(reduceMotion ? nil : MurmurMotion.quick,
+                       value: configuration.isPressed)
+    }
+}
+
+private struct RecentSection: View {
+    @EnvironmentObject var app: AppState
+    let compact: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("最近")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if !app.history.isEmpty {
+                    Button("清空") { app.clearHistory() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .help("清空最近记录")
+                }
+            }
+            .padding(.horizontal, compact ? 16 : 22)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
+
+            if app.history.isEmpty {
+                EmptyHistory(compact: compact)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(Array(app.history.prefix(compact ? 6 : 50))) { record in
+                            HistoryRow(record: record,
+                                       compact: compact,
+                                       onDelete: { app.deleteHistory(record) })
+                        }
+                    }
+                    .padding(.horizontal, compact ? 8 : 12)
+                    .padding(.bottom, 10)
+                }
+                .frame(maxHeight: compact ? 254 : .infinity)
+            }
+        }
+        .frame(maxHeight: presentationHeight, alignment: .top)
+    }
+
+    private var presentationHeight: CGFloat? {
+        compact ? nil : .infinity
+    }
+}
+
+private struct EmptyHistory: View {
+    @EnvironmentObject var app: AppState
+    let compact: Bool
+
+    var body: some View {
+        VStack(spacing: 8) {
+            VoiceCursorSymbol(tint: .secondary)
+                .frame(width: 24, height: 24)
+                .opacity(0.55)
+            Text("第一次输入会出现在这里")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("按")
+                ShortcutKeyCap(text: app.hotKeyDisplay, compact: true)
+                Text("开始")
+            }
+            .font(.system(size: 10.5))
+            .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, compact ? 28 : 42)
+    }
+}
+
+private struct HistoryRow: View {
+    let record: DictationRecord
+    let compact: Bool
+    let onDelete: () -> Void
+
+    @State private var copied = false
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(record.text)
-                    .font(.system(size: 12.5))
-                    .lineLimit(3)
+                    .font(.system(size: compact ? 12 : 12.5))
+                    .lineSpacing(2)
+                    .lineLimit(compact ? 2 : 3)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Text(relativeTime(record.date))
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 4)
-            Button {
-                copy()
-            } label: {
+
+            Button(action: copy) {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 12))
-                    .foregroundStyle(copied ? .green : .secondary)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(copied ? MurmurPalette.success : Color.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("复制")
+            .help(copied ? "已复制" : "复制")
+            .accessibilityLabel(copied ? "已复制" : "复制")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, compact ? 8 : 10)
+        .padding(.vertical, compact ? 9 : 10)
+        .background(hovered ? MurmurPalette.quietFill : .clear,
+                    in: RoundedRectangle(cornerRadius: 7))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .animation(MurmurMotion.quick, value: hovered)
         .contextMenu {
             Button("复制") { copy() }
             Button("删除", role: .destructive) { onDelete() }
@@ -278,9 +427,9 @@ private struct HistoryRow: View {
     }
 
     private func copy() {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(record.text, forType: .string)
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(record.text, forType: .string)
         copied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
     }

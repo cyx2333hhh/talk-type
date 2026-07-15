@@ -7,7 +7,7 @@ struct MurmurApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            HomeView()
+            HomeView(presentation: .menuBar)
                 .environmentObject(app)
         } label: {
             Image(app.menuBarImageName)

@@ -20,6 +20,7 @@ enum Keys {
     static let historyData = "historyData"
 
     static let defaultRecognitionContext = """
+    Talk-type
     Murmur
     DeepSeek
     ChatGPT
