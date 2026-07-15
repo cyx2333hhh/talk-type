@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="docs/icon.png" width="128" alt="Talk-type app icon" />
+<img src="docs/icon.png" width="128" alt="Talk-type 图标" />
 
 # Talk-type
 
-**让说话直接成为输入。**
+**按一下，说话，再按一下。文字就落在光标那里。**
 
-Local-first voice typing for macOS. Talk naturally, then let the text appear at your cursor.
+一款给 macOS 用的语音输入工具，中文为主，也认真处理夹在中文里的英文。
 
 ![macOS](https://img.shields.io/badge/macOS-14%2B-111111)
 ![Swift](https://img.shields.io/badge/Swift-5-F05138)
@@ -17,97 +17,116 @@ Local-first voice typing for macOS. Talk naturally, then let the text appear at 
 
 </div>
 
----
+<p align="center">
+  <img src="docs/shot-main.png" width="620" alt="Talk-type 主界面" />
+</p>
 
 ## 中文
 
-### Talk + Type
+### 为什么做 Talk-type
 
-Talk-type 是一款面向 macOS 的本地优先语音输入工具。把光标放在任意输入框，按一下快捷键开始说话，再按一下结束，文字就会被转写、整理并插入当前光标位置。
+我想要的语音输入其实很简单：光标在哪里，话就输入到哪里。它应该像键盘一样随手，而不是先打开一个聊天窗口，再复制一遍结果。
 
-它不是聊天助手。无论你说的是问题、命令、提示词还是代码，Talk-type 都只负责忠实地整理并输入你说过的内容，不回答问题、不执行指令，也不为了“更通顺”而随意删减信息。
+真正用起来，麻烦通常出在两个地方。
 
-### 核心体验
+第一个是中英混合。中文句子里只要出现 `GitHub`、`SwiftUI`、`API` 或一个不常见的产品名，识别结果就很容易跑偏。第二个是文本整理。有些模型看到问句会顺手回答，看到重复会主动删掉，最后得到的文字更“漂亮”，却不是我刚才说的内容。
 
-- **说完即输入**：默认使用 `fn / 🌐` 键开始和停止录音，结果自动插入当前输入框。
-- **中英混合优化**：本地 Whisper Small 负责最终转写，Apple Speech 提供实时预览与自动回退；自定义词库可提示产品名、技术词和英文专名。
-- **理解输入框上下文**：可读取光标附近最多 800 个字符，用于匹配列表、段落、标点、大小写、语气和明确术语。
-- **保守的 AI 整理**：DeepSeek 只做标点、断句、分段、排版和小幅纠错；问题仍然输出为问题，原有信息优先保留。
-- **本地优先**：安装 Whisper Small 后，最终语音转写在 Mac 本地完成；DeepSeek 完全可选。
-- **系统级交互**：支持全局快捷键、菜单栏入口、Dock 主窗口、录音浮层、最近记录和复制兜底。
+Talk-type 就围绕这两个问题做：识别尽量准，整理尽量克制。你说的是问句，它就输入问句；你口述的是命令、提示词或代码，它也只把这些内容放到光标处，不替你执行。
 
-### 识别链路
+名字里的 `T` 同时来自 Talk 和 Type。图标的白色横线是声音，青绿色竖线是输入光标，两部分合在一起才是完整的 T。
 
-| 环节 | 作用 | 是否必需 |
-| --- | --- | --- |
-| Whisper Small | 本地最终转写，优先处理中英混合内容 | 推荐 |
-| Apple Speech | 实时预览；Whisper 不可用时作为最终回退 | 自动使用 |
-| DeepSeek | 结合词库和输入框上下文，保守整理格式与表达 | 可选 |
+### 日常怎么用
+
+把光标放进聊天框、文档、搜索框、代码注释或任何能输入文字的地方：
+
+1. 按一次 `fn / 🌐` 开始录音。
+2. 正常说话，浮层会显示音量、时间和实时预览。
+3. 再按一次停止。
+4. Talk-type 完成最终识别和可选整理，把文字插入当前光标位置。
+
+默认快捷键可以修改。菜单栏入口、主窗口里的麦克风按钮也能开始录音。最近 50 条结果保存在本机，自动粘贴失败时还可以直接复制。
+
+### 它实际做了什么
+
+Talk-type 把“听清楚”和“整理好”拆成了两步。
+
+录音开始后，程序一边把音频写入临时 WAV，一边用 Apple Speech 显示实时预览。停止录音后，如果本机已经装好 Whisper Small，就由 Whisper 完成最终转写；没有安装、执行失败或没有得到结果时，再回退到 Apple Speech。
+
+Whisper 会收到一个很短的提示，其中包含中英词库和光标前文。这样做是为了帮助它认出英文专名，但不会把大量英文词硬塞进提示里，避免普通中文被识别成英文。
+
+如果打开 DeepSeek 整理，转写完成后才会发送文字。它负责补标点、断句、分段、匹配列表格式，以及修正很明确的错字和英文大小写。它不参与录音，也不是语音识别引擎。
+
+整理结果不会直接照单全收。Talk-type 还会做一次本地检查：结果突然变长或变短、数字丢失、把输入框旧内容复制进来，或者把一段中文大面积改成英文，都会被拒绝，最后改用原始转写。
 
 ```text
-快捷键 / 录音按钮
-        ↓
-录制临时 WAV + Apple Speech 实时预览
-        ↓
+按下快捷键
+    ↓
+临时录音 + Apple Speech 实时预览
+    ↓
 Whisper Small 本地最终转写
-        ↓ 不可用时
-Apple Speech 最终回退
-        ↓
-DeepSeek 保守整理（可选）
-        ↓
-插入当前光标位置，并还原原剪贴板
+    ↓ 失败时自动回退
+Apple Speech 最终识别
+    ↓
+DeepSeek 保守整理（可关闭）
+    ↓
+本地完整性检查
+    ↓
+插入光标位置，并还原原来的剪贴板
 ```
 
-### 隐私边界
+### 输入框上下文
 
-- 录音只用于本次转写，临时音频文件会在处理结束后删除。
-- Whisper Small 转写完全在本机进行。
-- Apple Speech 是否使用网络取决于 macOS、语言和设备支持情况。
-- 只有启用 DeepSeek 时，本次转写文本、可选英文辅助结果和光标上下文才会发送给 DeepSeek；音频不会发送给 DeepSeek。
-- DeepSeek API Key 只保存在 macOS 钥匙串中。
-- 光标上下文只用于当前一次输入，可在设置中关闭。
+开启“参考输入框上下文”后，Talk-type 会在录音开始时读取光标附近最多 800 个字符。这个上下文只用来判断：
 
-### 使用方法
+- 当前是在写普通段落、列表还是代码式文本；
+- 应该沿用什么标点、换行、大小写和语气；
+- 某个同音词或英文专名在前文里是怎么写的。
 
-1. 把光标放进任意可编辑文本框。
-2. 按 `fn / 🌐`，或点击 Talk-type 的录音按钮。
-3. 自然说话；浮层会显示音量、状态和实时预览。
-4. 再按一次快捷键停止。
-5. Talk-type 完成转写与可选整理后，将文字插入光标位置。
+它不会把旧内容拼到新结果里，也不会让 DeepSeek 回答或续写输入框里的文字。关闭这个选项后，Talk-type 不会读取光标附近内容。
 
-如果目标 App 不允许自动粘贴，结果仍会保留在剪贴板，可手动按 `⌘V`。
+<p align="center">
+  <img src="docs/shot-settings.png" width="720" alt="Talk-type 识别与整理设置" />
+</p>
 
-### 环境要求
+<p align="center"><sub>识别引擎、实时预览、上下文和文本整理可以分别控制。</sub></p>
 
-- macOS 14 Sonoma 或更高版本
-- Xcode 16 或更高版本（仅构建时需要）
-- 麦克风权限
-- 语音识别权限（Apple Speech 实时预览与回退）
-- 辅助功能权限（全局 `fn` 监听、读取输入框上下文和自动插入）
+### 中英混合词库
 
-### 构建
+设置页里的“中英词库”不是一套只能识别固定单词的词典。它更像一组提示词，用来告诉识别器“这段话里可能出现这些写法”。
 
-当前开发版本位于 `GPT` 分支，`main` 保留为原始稳定线。
+默认包含常见技术词，例如 `DeepSeek`、`ChatGPT`、`Claude`、`OpenAI`、`Swift`、`Xcode`、`GitHub` 和 `Python`。你可以删掉不需要的词，也可以加入自己的项目名、人名、公司名或行业术语。
 
-```bash
-git clone --branch GPT https://github.com/cyx2333hhh/murmur-mac.git
-cd murmur-mac
-open Murmur.xcodeproj
-```
+词库只提供参考，不会把没有说过的词强行插入结果。Whisper 最多取前 24 个词作为短提示，DeepSeek 整理最多参考前 80 个词。
 
-在 Xcode 中选择 `Murmur` target，在 Signing & Capabilities 中设置自己的 Team，然后运行。自动插入其它 App 需要关闭 App Sandbox。
+### 本地识别与 DeepSeek
 
-无签名命令行构建：
+不填 DeepSeek API Key，Talk-type 仍然可以正常录音、识别和输入。两者的分工是：
 
-```bash
-xcodebuild -project Murmur.xcodeproj -target Murmur CODE_SIGNING_ALLOWED=NO build
-```
+- **Whisper Small / Apple Speech**：把声音变成文字。
+- **DeepSeek**：在已有文字上做一次可选的保守整理。
 
-构建产物为 `build/Release/Talk-type.app`。
+本机使用的 Whisper Small 模型约 465 MB。模型装好后，最终转写优先在本地完成；Apple Speech 继续负责实时预览和自动回退。
 
-### 配置 Whisper Small
+### 隐私说明
 
-Talk-type 会在以下位置查找 `whisper-cli`：
+- 临时录音会在本次处理结束后删除。
+- Whisper Small 完全在本机运行。
+- Apple Speech 是否联网由 macOS、语言和设备支持情况决定。
+- DeepSeek 只在你主动开启整理并填写 Key 时收到本次转写、可选英文辅助结果和光标上下文；音频不会发给 DeepSeek。
+- API Key 保存在 macOS 钥匙串，不写入项目文件或 UserDefaults。
+- 最近记录保存在本机，可以随时清空。
+
+### 当前限制
+
+- Whisper Small 需要另外安装 `whisper-cli` 和模型文件，目前没有内置下载器。
+- Apple Speech 的实时预览只是参考，可能和最终 Whisper 结果不同。
+- 全局 `fn`、读取光标上下文和自动粘贴需要辅助功能权限。
+- 某些使用自定义编辑器的 App 不接受模拟粘贴，这种情况下结果会保留在剪贴板。
+- 项目目前以源码形式发布，还没有做面向普通用户的签名安装包和自动更新。
+
+### 安装 Whisper Small
+
+Talk-type 会在下面两个位置查找 `whisper-cli`：
 
 ```text
 /opt/homebrew/bin/whisper-cli
@@ -120,99 +139,74 @@ Talk-type 会在以下位置查找 `whisper-cli`：
 ~/Library/Application Support/Talk-type/Models/ggml-small.bin
 ```
 
-为兼容旧版本，原路径仍然可用：
+旧版本使用过的路径仍然兼容：
 
 ```text
 ~/Library/Application Support/Murmur/Models/ggml-small.bin
 ```
 
-未安装 Whisper 时，Talk-type 会自动使用 Apple Speech 完成最终识别。
-
-### 配置 DeepSeek
-
-DeepSeek 不是语音识别引擎，也不是必需依赖。它只在转写完成后执行一次可选文本整理。
-
-在设置页填入 API Key 并打开智能整理后，可获得：
-
-- 标点、断句和分段
-- 与当前输入框一致的列表与排版
-- 英文专名、大小写和明确错字的小幅纠正
-- 对问题、命令和原始信息的保守保留
-
-留空 API Key 或关闭智能整理，即可只使用本地识别链路。
-
-### 技术结构
-
-- `SwiftUI + AppKit`：菜单栏、主窗口、设置窗口和录音浮层
-- `AVAudioEngine`：单次录音、音量采样和 WAV 写入
-- `Speech`：实时预览与最终回退
-- `whisper.cpp`：Whisper Small 本地最终转写
-- `Accessibility API`：读取当前输入框上下文并插入文字
-- `Keychain Services`：保存 DeepSeek API Key
-- `CoreGraphics`：程序化生成 App 与菜单栏图标
-
----
-
-## English
-
-### Talk + Type
-
-Talk-type is a local-first voice typing utility for macOS. Put the cursor in any editable field, press the hotkey, speak, and press it again. Your speech is transcribed, conservatively cleaned up, and inserted where you were typing.
-
-It is an input tool, not a chatbot. Questions remain questions, commands remain text, and meaningful content is preserved instead of being answered, executed, summarized, or rewritten away.
-
-### Highlights
-
-- **Type by talking** with a global `fn / 🌐` shortcut or the record button.
-- **Mixed Chinese and English** transcription with local Whisper Small, Apple Speech fallback, and a customizable vocabulary.
-- **Cursor-aware formatting** using up to 800 nearby characters to match paragraphs, lists, punctuation, casing, tone, and known terms.
-- **Conservative DeepSeek cleanup** for punctuation, sentence boundaries, layout, and small unambiguous corrections.
-- **Native macOS workflow** with a menu-bar entry, centered main window, Dock presence, recording overlay, recent history, and clipboard fallback.
-- **Privacy-first controls** with local transcription, optional context capture, optional AI cleanup, and Keychain-only API key storage.
-
-### Processing pipeline
-
-| Stage | Purpose | Required |
-| --- | --- | --- |
-| Whisper Small | Local final transcription, preferred for mixed-language speech | Recommended |
-| Apple Speech | Live preview and final fallback | Automatic |
-| DeepSeek | Conservative formatting with vocabulary and cursor context | Optional |
-
-Audio is recorded to a temporary WAV file and deleted after processing. Whisper runs locally. Apple Speech behavior depends on macOS and language support. DeepSeek receives text and optional cursor context only when cleanup is enabled; it never receives the audio.
-
-### Build
-
-Active development is on the `GPT` branch. The `main` branch remains the original stable line.
+### 从源码构建
 
 ```bash
-git clone --branch GPT https://github.com/cyx2333hhh/murmur-mac.git
+git clone https://github.com/cyx2333hhh/murmur-mac.git
 cd murmur-mac
 open Murmur.xcodeproj
 ```
 
-Select the `Murmur` target, choose your own development team, and run. App Sandbox must remain disabled for cross-application insertion.
+在 Xcode 中选择 `Murmur` target，设置自己的 Development Team 后运行。跨 App 读取和插入文字需要保持 App Sandbox 关闭。
 
-Command-line build without signing:
+无签名命令行构建：
 
 ```bash
 xcodebuild -project Murmur.xcodeproj -target Murmur CODE_SIGNING_ALLOWED=NO build
 ```
 
-The built application is `build/Release/Talk-type.app`.
+产物位于 `build/Release/Talk-type.app`。项目会同时构建 Apple Silicon 和 Intel 架构。
 
-### Local Whisper setup
+### 代码结构
 
-Talk-type looks for `whisper-cli` in `/opt/homebrew/bin` or `/usr/local/bin`. Place `ggml-small.bin` at:
+- `AudioCapture.swift`：录音、实时预览和音量数据
+- `LocalWhisperTranscriber.swift`：调用本地 whisper.cpp
+- `DeepSeekClient.swift`：保守文本整理提示和请求
+- `TextInserter.swift`：读取输入框上下文、插入文字并还原剪贴板
+- `AppState.swift`：识别流程、回退策略、结果检查和历史记录
+- `RecordingOverlayView.swift`：录音与处理状态浮层
+- `Murmur-icongen.swift`：生成 App 图标和菜单栏图标
 
-```text
-~/Library/Application Support/Talk-type/Models/ggml-small.bin
+---
+
+## English
+
+Talk-type is a macOS voice typing tool built for one narrow job: put the words you speak at the cursor.
+
+It does not open a chat of its own, answer spoken questions, or execute dictated commands. A question stays a question. A prompt stays a prompt. The app separates transcription from cleanup so formatting can improve without silently changing what was said.
+
+The final transcript prefers local Whisper Small, with Apple Speech used for live preview and fallback. A custom vocabulary helps with English names inside Chinese speech. Optional cursor context can match the surrounding list, punctuation, casing, and terminology.
+
+DeepSeek is optional and runs only after transcription. Its output is checked locally and rejected when it drops numbers, removes too much content, repeats existing cursor context, expands unexpectedly, or turns Chinese into unrelated English. When that happens, Talk-type inserts the raw transcript instead.
+
+### Quick use
+
+1. Put the cursor in any editable field.
+2. Press `fn / 🌐` and speak.
+3. Press it again to stop.
+4. Talk-type transcribes, optionally tidies, and inserts the result.
+
+The app keeps up to 50 recent results locally and leaves a copy on the clipboard when automatic insertion is unavailable.
+
+### Privacy
+
+Temporary audio is deleted after processing. Whisper runs locally. Apple Speech behavior depends on macOS and language support. DeepSeek receives text and optional cursor context only when cleanup is enabled, and never receives the audio. The API key is stored in the macOS Keychain.
+
+### Build
+
+```bash
+git clone https://github.com/cyx2333hhh/murmur-mac.git
+cd murmur-mac
+xcodebuild -project Murmur.xcodeproj -target Murmur CODE_SIGNING_ALLOWED=NO build
 ```
 
-The legacy `~/Library/Application Support/Murmur/Models/ggml-small.bin` path remains supported so existing downloads continue to work.
-
-### DeepSeek setup
-
-DeepSeek is optional and runs only after transcription. Add an API key in Settings to enable conservative punctuation, paragraphing, formatting, casing, and small unambiguous corrections. Leave the key empty, or disable cleanup, to use the recognition pipeline without DeepSeek.
+The resulting app is `build/Release/Talk-type.app`. Select the `Murmur` target and your own Development Team when building in Xcode. App Sandbox must remain disabled for cross-application context reading and insertion.
 
 ---
 
