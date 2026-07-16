@@ -83,8 +83,8 @@ Whisper Small 模型约 465 MB。没有安装模型时，Talk-type 会使用 App
 <summary><strong>从源码构建</strong></summary>
 
 ```bash
-git clone https://github.com/cyx2333hhh/murmur-mac.git
-cd murmur-mac
+git clone https://github.com/cyx2333hhh/talk-type.git
+cd talk-type
 open Murmur.xcodeproj
 ```
 
