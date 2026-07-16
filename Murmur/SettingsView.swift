@@ -208,7 +208,7 @@ struct SettingsView: View {
 
             settingsSection("上下文与整理") {
                 settingsRow(title: "参考输入框上下文",
-                            detail: "读取光标附近最多 800 字，用于匹配格式、语气与明确术语。") {
+                            detail: "读取光标附近最多 240 字，用于匹配格式、语气与明确术语。") {
                     Toggle("", isOn: $useInputContext)
                         .labelsHidden()
                 }

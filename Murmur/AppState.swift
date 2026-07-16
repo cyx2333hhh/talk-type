@@ -376,6 +376,7 @@ final class AppState: ObservableObject {
 
         // 3) Insert (and keep the text around for the copy button).
         phase = .inserting
+        text = TextInserter.textForInsertion(text, context: inputContext)
         lastResultText = text
         lastResultPasted = TextInserter.insert(text)
         addHistory(text)

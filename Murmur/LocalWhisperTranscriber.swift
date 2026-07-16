@@ -13,46 +13,70 @@ enum LocalWhisperTranscriber {
                            language: String,
                            vocabulary: [String],
                            inputContext: FocusedTextContext) async -> String? {
+        let selectedModelURL = modelURL
         guard let executableURL,
-              FileManager.default.fileExists(atPath: modelURL.path) else { return nil }
+              FileManager.default.fileExists(atPath: selectedModelURL.path) else { return nil }
 
         let prompt = makePrompt(vocabulary: vocabulary, inputContext: inputContext)
         let whisperLanguage = normalizedLanguage(language)
+        var arguments = [
+            "-m", selectedModelURL.path,
+            "-f", audioURL.path,
+            "-l", whisperLanguage,
+            "-nt",
+            "-np",
+            "-sns",
+        ]
+        if !prompt.isEmpty {
+            arguments.append(contentsOf: ["--prompt", prompt, "--carry-initial-prompt"])
+        }
 
         return await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            let output = Pipe()
-            process.executableURL = executableURL
-
-            var arguments = [
-                "-ng",
-                "-m", modelURL.path,
-                "-f", audioURL.path,
-                "-l", whisperLanguage,
-                "-nt",
-                "-np",
-                "-sns",
-            ]
-            if !prompt.isEmpty {
-                arguments.append(contentsOf: ["--prompt", prompt, "--carry-initial-prompt"])
-            }
-            process.arguments = arguments
-            process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
-
-            do {
-                try process.run()
-                let data = output.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0,
-                      let transcript = String(data: data, encoding: .utf8)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines),
-                      !transcript.isEmpty else { return nil }
-                return transcript
-            } catch {
+            switch runWhisper(executableURL: executableURL, arguments: arguments) {
+            case .transcript(let text):
+                return text
+            case .empty:
+                return nil
+            case .failed:
+                // Metal is much faster on Apple silicon. Fall back to CPU only
+                // when the local whisper.cpp GPU backend cannot run.
+                var cpuArguments = arguments
+                cpuArguments.insert("-ng", at: 0)
+                if case .transcript(let text) = runWhisper(executableURL: executableURL,
+                                                            arguments: cpuArguments) {
+                    return text
+                }
                 return nil
             }
         }.value
+    }
+
+    private enum RunResult {
+        case transcript(String)
+        case empty
+        case failed
+    }
+
+    private static func runWhisper(executableURL: URL, arguments: [String]) -> RunResult {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return .failed }
+            guard let transcript = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !transcript.isEmpty else { return .empty }
+            return .transcript(transcript)
+        } catch {
+            return .failed
+        }
     }
 
     private static var modelURL: URL {
@@ -98,7 +122,7 @@ enum LocalWhisperTranscriber {
         }
 
         let precedingText = inputContext.beforeCursor
-            .suffix(320)
+            .suffix(120)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !precedingText.isEmpty {
             parts.append("前文：\(precedingText)")

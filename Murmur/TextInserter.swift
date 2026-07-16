@@ -3,12 +3,34 @@ import ApplicationServices
 
 struct FocusedTextContext {
     static let empty = FocusedTextContext(beforeCursor: "", afterCursor: "")
+    static let maxCharacters = 240
+
+    private static let sentenceTerminators: Set<Character> = ["。", ".", "！", "!", "？", "?"]
 
     let beforeCursor: String
     let afterCursor: String
 
     var isEmpty: Bool {
         beforeCursor.isEmpty && afterCursor.isEmpty
+    }
+
+    var hasFollowingTextOnCurrentLine: Bool {
+        for character in afterCursor {
+            if character.isNewline { return false }
+            if !character.isWhitespace { return true }
+        }
+        return false
+    }
+
+    var isInsideSentenceOnCurrentLine: Bool {
+        guard hasFollowingTextOnCurrentLine else { return false }
+        for character in beforeCursor.reversed() {
+            if character.isNewline { return false }
+            if !character.isWhitespace {
+                return !Self.sentenceTerminators.contains(character)
+            }
+        }
+        return false
     }
 }
 
@@ -18,9 +40,12 @@ struct FocusedTextContext {
 enum TextInserter {
     static var isTrusted: Bool { AXIsProcessTrusted() }
 
+    private static let sentenceTerminators: Set<Character> = ["。", ".", "！", "!", "？", "?"]
+    private static let closingDelimiters: Set<Character> = ["”", "’", "\"", "'", "）", ")", "]", "】", "》", "」", "』"]
+
     /// Reads a small window around the current insertion point. Secure fields
     /// are deliberately ignored, and the returned value is never persisted.
-    static func focusedTextContext(maxCharacters: Int = 800) -> FocusedTextContext {
+    static func focusedTextContext(maxCharacters: Int = FocusedTextContext.maxCharacters) -> FocusedTextContext {
         guard isTrusted, maxCharacters > 0 else { return .empty }
 
         let system = AXUIElementCreateSystemWide()
@@ -59,6 +84,42 @@ enum TextInserter {
         let after = source.substring(with: NSRange(location: afterStart,
                                                    length: afterLength))
         return FocusedTextContext(beforeCursor: before, afterCursor: after)
+    }
+
+    /// Removes an automatically generated sentence terminator when a short
+    /// dictation is being inserted before existing text on the same line.
+    static func textForInsertion(_ text: String, context: FocusedTextContext) -> String {
+        guard context.hasFollowingTextOnCurrentLine,
+              !text.contains(where: { $0.isNewline }) else { return text }
+
+        let signalCount = text.reduce(into: 0) { count, character in
+            if character.isLetter || character.isNumber { count += 1 }
+        }
+        guard signalCount > 0,
+              signalCount <= 24 || context.isInsideSentenceOnCurrentLine else { return text }
+
+        var characters = Array(text)
+        var closingSuffix: [Character] = []
+        while let last = characters.last, closingDelimiters.contains(last) {
+            closingSuffix.insert(characters.removeLast(), at: 0)
+        }
+
+        // A final period can be part of a dotted abbreviation such as U.S. or e.g.
+        if characters.last == ".",
+           String(characters).range(
+               of: #"(?:^|[^A-Za-z])(?:[A-Za-z]{1,3}\.){2,}$"#,
+               options: .regularExpression
+           ) != nil {
+            return text
+        }
+
+        var removedTerminator = false
+        while let last = characters.last, sentenceTerminators.contains(last) {
+            characters.removeLast()
+            removedTerminator = true
+        }
+        guard removedTerminator else { return text }
+        return String(characters + closingSuffix)
     }
 
     /// Returns true if it auto-pasted, false if it could only copy to clipboard.
