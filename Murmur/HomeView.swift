@@ -89,13 +89,9 @@ private struct EngineStatusLabel: View {
     var body: some View {
         HStack(spacing: 5) {
             Circle()
-                .fill(LocalWhisperTranscriber.isAvailable
-                      ? MurmurPalette.accent
-                      : MurmurPalette.warning)
+                .fill(MurmurPalette.accent)
                 .frame(width: 5, height: 5)
-            Text(LocalWhisperTranscriber.isAvailable
-                 ? "WHISPER SMALL · 本地"
-                 : "APPLE SPEECH · 回退")
+            Text("APPLE SPEECH · 主识别")
                 .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
         }
@@ -188,7 +184,7 @@ private struct DictationStage: View {
         switch app.phase {
         case .idle: return "准备输入"
         case .recording: return "正在聆听"
-        case .transcribing: return "正在本地转写"
+        case .transcribing: return "正在确认识别"
         case .correcting: return "正在匹配上下文"
         case .inserting: return "正在插入"
         case .success: return app.lastResultPasted ? "输入完成" : "已复制到剪贴板"
@@ -200,7 +196,7 @@ private struct DictationStage: View {
         switch app.phase {
         case .idle: return "说完后再次按下快捷键"
         case .recording: return "自然说话，中英文可以混合"
-        case .transcribing: return "Whisper Small 正在处理本地音频"
+        case .transcribing: return "正在确认 Apple Speech 结果"
         case .correcting: return "保留原意，仅优化格式与明确错误"
         case .inserting: return "写入当前光标位置"
         case .success: return app.lastResultPasted ? "文字已写入当前光标位置" : "可使用 ⌘V 手动粘贴"

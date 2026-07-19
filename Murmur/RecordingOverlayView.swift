@@ -159,10 +159,16 @@ struct RecordingOverlayView: View {
 
     private var statusDetail: String {
         switch app.phase {
-        case .transcribing: return "Whisper 正在识别本地音频"
-        case .correcting: return "正在匹配上下文与排版"
-        case .inserting: return "即将写入当前光标位置"
-        case .success: return app.lastResultPasted ? "已写入当前光标位置" : "可使用 ⌘V 手动粘贴"
+        case .transcribing:
+            return app.partialText.isEmpty ? "正在确认最终文本" : app.partialText
+        case .correcting:
+            return app.partialText.isEmpty ? "正在匹配上下文与排版" : app.partialText
+        case .inserting:
+            return app.partialText.isEmpty ? "即将写入当前光标位置" : app.partialText
+        case .success:
+            return app.lastResultText.isEmpty
+                ? (app.lastResultPasted ? "已写入当前光标位置" : "可使用 ⌘V 手动粘贴")
+                : app.lastResultText
         case .failed: return app.errorMessage ?? "请重新尝试"
         default: return ""
         }

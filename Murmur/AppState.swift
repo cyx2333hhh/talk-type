@@ -1,12 +1,12 @@
 import SwiftUI
 import AppKit
 import Combine
+import NaturalLanguage
 
 /// User-defaults keys + their default values.
 enum Keys {
     static let chatModel = "chatModel"
     static let language = "language"
-    static let recognitionEngine = "recognitionEngine"
     static let recognitionContext = "recognitionContext"
     static let enableBilingualRecognition = "enableBilingualRecognition"
     static let bilingualRecognitionSafetyReset = "bilingualRecognitionSafetyReset"
@@ -71,7 +71,6 @@ enum Keys {
         UserDefaults.standard.register(defaults: [
             chatModel: "deepseek-chat",
             language: "zh",
-            recognitionEngine: "whisper",
             recognitionContext: defaultRecognitionContext,
             enableBilingualRecognition: false,
             enableCorrection: true,
@@ -130,6 +129,10 @@ final class AppState: ObservableObject {
     private var hideTask: Task<Void, Never>?
     private var isStarting = false
     private var capturedInputContext = FocusedTextContext.empty
+    private var liveRawTranscript = ""
+    private var liveCorrectedSource = ""
+    private var liveCorrectedText = ""
+    private var liveCorrectionTask: Task<Void, Never>?
 
     private lazy var panel = PanelController(
         content: AnyView(RecordingOverlayView().environmentObject(self)),
@@ -150,7 +153,7 @@ final class AppState: ObservableObject {
             MainActor.assumeIsolated { self?.pushLevel(level) }
         }
         capture.onPartial = { [weak self] text in
-            MainActor.assumeIsolated { self?.partialText = text }
+            MainActor.assumeIsolated { self?.receiveLiveTranscript(text) }
         }
         let trigger: () -> Void = { Task { @MainActor in AppState.shared.toggle() } }
         HotKeyManager.shared.onTrigger = trigger
@@ -192,9 +195,6 @@ final class AppState: ObservableObject {
     }
     private var language: String {
         UserDefaults.standard.string(forKey: Keys.language) ?? ""
-    }
-    private var recognitionEngine: String {
-        UserDefaults.standard.string(forKey: Keys.recognitionEngine) ?? "whisper"
     }
     private var correctionEnabled: Bool {
         UserDefaults.standard.bool(forKey: Keys.enableCorrection)
@@ -261,6 +261,11 @@ final class AppState: ObservableObject {
 
         errorMessage = nil
         partialText = ""
+        liveRawTranscript = ""
+        liveCorrectedSource = ""
+        liveCorrectedText = ""
+        liveCorrectionTask?.cancel()
+        liveCorrectionTask = nil
         hideTask?.cancel()
         capturedInputContext = inputContextEnabled
             ? TextInserter.focusedTextContext()
@@ -272,7 +277,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        let whisperReady = recognitionEngine == "whisper" && LocalWhisperTranscriber.isAvailable
+        let whisperReady = LocalWhisperTranscriber.isAvailable
         let speechIsRequired = !whisperReady
         let speechGranted: Bool
         if livePreviewEnabled || speechIsRequired {
@@ -281,7 +286,7 @@ final class AppState: ObservableObject {
             speechGranted = AudioCapture.speechAuthorized()
         }
         guard !speechIsRequired || speechGranted else {
-            fail("当前识别引擎不可用，且未获得「语音识别」权限。请在设置中检查识别引擎和权限。")
+            fail("Apple Speech 不可用，且本地 Whisper 尚未就绪。请在设置中检查语音识别权限。")
             return
         }
 
@@ -302,54 +307,73 @@ final class AppState: ObservableObject {
 
     private func stop() async {
         stopClock()
-        guard let url = capture.stop() else {
+        liveCorrectionTask?.cancel()
+        liveCorrectionTask = nil
+        // Apple Speech drives the text the user can already see in the overlay.
+        // Keep that result as a real candidate instead of throwing it away when
+        // the slower file-based pass starts.
+        let liveTranscript = liveRawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reusableCorrection = liveCorrectedSource == liveTranscript
+            ? liveCorrectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            : ""
+        guard let capturedAudio = capture.stop() else {
             fail("没有录到音频。")
             return
         }
+        let url = capturedAudio.url
         defer { try? FileManager.default.removeItem(at: url) }
+
+        guard capturedAudio.hasMeaningfulSpeech else {
+            fail("未检测到语音，本次输入已取消。")
+            return
+        }
 
         let inputContext = capturedInputContext
         capturedInputContext = .empty
 
-        // 1) Prefer local Whisper Small for mixed Chinese/English, with Apple
-        // Speech as a fallback and as the live-preview engine.
+        // 1) Apple Speech is authoritative whenever it produced visible text.
+        // Only retry Apple on the recorded file when the live result is empty;
+        // Whisper is a last-resort fallback, never an automatic replacement.
         phase = .transcribing
         let contextualStrings = recognitionContextTerms
         var usedWhisper = false
-        var recognized: String?
+        var raw = liveTranscript
 
-        if recognitionEngine == "whisper", LocalWhisperTranscriber.isAvailable {
-            recognized = await LocalWhisperTranscriber.transcribe(url,
-                                                                  language: language,
-                                                                  vocabulary: contextualStrings,
-                                                                  inputContext: inputContext)
-            usedWhisper = !(recognized ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .isEmpty
-        }
-
-        if !usedWhisper {
+        if raw.isEmpty {
             var speechGranted = AudioCapture.speechAuthorized()
             if !speechGranted {
                 speechGranted = await AudioCapture.ensureSpeechPermission()
             }
             if speechGranted {
-                recognized = await AudioCapture.recognizeFile(url,
-                                                              localeIdentifier: recognitionLocale,
-                                                              contextualStrings: [])
+                raw = await AudioCapture.recognizeFile(url,
+                                                       localeIdentifier: recognitionLocale,
+                                                       contextualStrings: contextualStrings)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             }
         }
 
-        let raw = (recognized ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty, LocalWhisperTranscriber.isAvailable {
+            raw = await LocalWhisperTranscriber.transcribe(url,
+                                                           language: language,
+                                                           vocabulary: contextualStrings,
+                                                           inputContext: inputContext)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            usedWhisper = !raw.isEmpty
+        }
+
         guard !raw.isEmpty else {
-            fail("没有识别到内容。请靠近麦克风后重试，或在设置中检查识别引擎。")
+            fail("没有识别到内容。请靠近麦克风后重试，或在设置中检查语音识别权限。")
             return
         }
+        partialText = raw
 
         // 2) Optionally tidy up / correct with DeepSeek (falls back to raw on failure).
         var text = raw
         let key = KeychainHelper.load() ?? ""
-        if correctionEnabled, !key.isEmpty {
+        let shouldUseAI = AppState.shouldUseAI(for: raw,
+                                               inputContext: inputContext,
+                                               vocabulary: contextualStrings)
+        if correctionEnabled, shouldUseAI, !key.isEmpty {
             let englishAssist: String?
             if shouldRunEnglishAssist && !usedWhisper {
                 englishAssist = await AudioCapture.recognizeFile(url,
@@ -361,22 +385,31 @@ final class AppState: ObservableObject {
             }
 
             phase = .correcting
-            if let cleaned = try? await DeepSeekClient(apiKey: key).correct(raw,
-                                                                            model: chatModel,
-                                                                            contextualStrings: contextualStrings,
-                                                                            englishTranscript: englishAssist,
-                                                                            inputContext: inputContext),
-               !cleaned.isEmpty,
+            if !reusableCorrection.isEmpty,
+               raw == liveTranscript,
                AppState.shouldAcceptCorrectedText(raw: raw,
-                                                  cleaned: cleaned,
+                                                  cleaned: reusableCorrection,
                                                   inputContext: inputContext) {
+                text = reusableCorrection
+            } else if let cleaned = try? await DeepSeekClient(apiKey: key).correct(raw,
+                                                                                   model: chatModel,
+                                                                                   contextualStrings: contextualStrings,
+                                                                                   englishTranscript: englishAssist,
+                                                                                   inputContext: inputContext),
+                      !cleaned.isEmpty,
+                      AppState.shouldAcceptCorrectedText(raw: raw,
+                                                         cleaned: cleaned,
+                                                         inputContext: inputContext) {
                 text = cleaned
             }
+            partialText = text
         }
 
         // 3) Insert (and keep the text around for the copy button).
         phase = .inserting
         text = TextInserter.textForInsertion(text, context: inputContext)
+        // The overlay and the target input receive this exact same string.
+        partialText = text
         lastResultText = text
         lastResultPasted = TextInserter.insert(text)
         addHistory(text)
@@ -384,6 +417,63 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - Live updates
+
+    private func receiveLiveTranscript(_ text: String) {
+        guard phase == .recording else { return }
+        let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty, raw != liveRawTranscript else { return }
+
+        liveRawTranscript = raw
+        partialText = raw
+        scheduleLiveCorrection(for: raw)
+    }
+
+    /// Debounces partial Speech updates so AI cleanup begins during recording
+    /// without issuing a request for every interim token.
+    private func scheduleLiveCorrection(for raw: String) {
+        liveCorrectionTask?.cancel()
+        liveCorrectionTask = nil
+        let contextualStrings = recognitionContextTerms
+        let inputContext = capturedInputContext
+        guard correctionEnabled,
+              AppState.shouldUseAI(for: raw,
+                                   inputContext: inputContext,
+                                   vocabulary: contextualStrings) else { return }
+
+        let model = chatModel
+        liveCorrectionTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 700_000_000)
+                try Task.checkCancellation()
+                guard let self,
+                      self.phase == .recording,
+                      self.liveRawTranscript == raw else { return }
+
+                let key = KeychainHelper.load() ?? ""
+                guard !key.isEmpty else { return }
+                let cleaned = try await DeepSeekClient(apiKey: key).correct(
+                    raw,
+                    model: model,
+                    contextualStrings: contextualStrings,
+                    inputContext: inputContext
+                )
+                try Task.checkCancellation()
+                guard self.phase == .recording,
+                      self.liveRawTranscript == raw,
+                      !cleaned.isEmpty,
+                      AppState.shouldAcceptCorrectedText(raw: raw,
+                                                         cleaned: cleaned,
+                                                         inputContext: inputContext) else { return }
+
+                self.liveCorrectedSource = raw
+                self.liveCorrectedText = cleaned
+                self.partialText = cleaned
+            } catch {
+                // Live cleanup is best-effort. Raw Speech text remains visible,
+                // and the final pass can still retry after recording stops.
+            }
+        }
+    }
 
     private func pushLevel(_ level: CGFloat) {
         guard phase == .recording else { return }
@@ -451,6 +541,36 @@ final class AppState: ObservableObject {
             }
     }
 
+    /// Standalone terms are inserted exactly as Apple Speech recognized them.
+    /// Sentences and terms inserted before existing text may use AI for
+    /// punctuation or context-aware correction.
+    static func shouldUseAI(for text: String,
+                            inputContext: FocusedTextContext,
+                            vocabulary: [String]) -> Bool {
+        if inputContext.hasFollowingTextOnCurrentLine { return true }
+        return !isStandaloneTerm(text, vocabulary: vocabulary)
+    }
+
+    static func isStandaloneTerm(_ text: String, vocabulary: [String]) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.contains(where: { $0.isNewline }) else { return false }
+
+        let normalized = signalText(trimmed)
+        if vocabulary.contains(where: { signalText($0) == normalized }) {
+            return true
+        }
+
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = trimmed
+        var tokenCount = 0
+        tokenizer.enumerateTokens(in: trimmed.startIndex..<trimmed.endIndex) { _, _ in
+            tokenCount += 1
+            return tokenCount < 2
+        }
+        return tokenCount == 1
+    }
+
     private static func shouldAcceptCorrectedText(raw: String,
                                                   cleaned: String,
                                                   inputContext: FocusedTextContext = .empty) -> Bool {
@@ -472,6 +592,12 @@ final class AppState: ObservableObject {
             return false
         }
 
+        if !hasConservativeContentChange(raw: raw,
+                                         cleaned: cleaned,
+                                         inputContext: inputContext) {
+            return false
+        }
+
         let rawHan = hanCharacterCount(raw)
         guard rawHan >= 2 else { return true }
 
@@ -485,6 +611,60 @@ final class AppState: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// Punctuation, whitespace and casing are free to change. Word/character
+    /// changes are tightly bounded so a cleanup model cannot replace a correct
+    /// transcript with a different sentence of similar length.
+    private static func hasConservativeContentChange(raw: String,
+                                                     cleaned: String,
+                                                     inputContext: FocusedTextContext) -> Bool {
+        let rawContent = Array(signalText(raw))
+        let cleanedContent = Array(signalText(cleaned))
+        if rawContent == cleanedContent { return true }
+
+        let longest = max(rawContent.count, cleanedContent.count)
+        if longest <= 8 {
+            guard inputContext.hasFollowingTextOnCurrentLine else { return false }
+            let allowedInlineChanges = min(2, longest)
+            return editDistance(rawContent,
+                                cleanedContent,
+                                stoppingAfter: allowedInlineChanges) <= allowedInlineChanges
+        }
+        // Sentence cleanup may need two adjacent substitutions to recover a
+        // split homophone (for example “确实别” -> “却识别”). Standalone terms
+        // never reach AI, so this wider allowance only applies with context.
+        let allowedChanges = max(2, min(8, (longest + 5) / 6))
+        guard abs(rawContent.count - cleanedContent.count) <= allowedChanges else { return false }
+        return editDistance(rawContent, cleanedContent, stoppingAfter: allowedChanges) <= allowedChanges
+    }
+
+    private static func editDistance(_ lhs: [Character],
+                                     _ rhs: [Character],
+                                     stoppingAfter limit: Int) -> Int {
+        if lhs.isEmpty { return rhs.count }
+        if rhs.isEmpty { return lhs.count }
+
+        var previous = Array(0...rhs.count)
+        for (leftIndex, left) in lhs.enumerated() {
+            var current = Array(repeating: 0, count: rhs.count + 1)
+            current[0] = leftIndex + 1
+            var rowMinimum = current[0]
+
+            for (rightIndex, right) in rhs.enumerated() {
+                let substitutionCost = left == right ? 0 : 1
+                current[rightIndex + 1] = min(
+                    previous[rightIndex + 1] + 1,
+                    current[rightIndex] + 1,
+                    previous[rightIndex] + substitutionCost
+                )
+                rowMinimum = min(rowMinimum, current[rightIndex + 1])
+            }
+
+            if rowMinimum > limit { return limit + 1 }
+            previous = current
+        }
+        return previous[rhs.count]
     }
 
     private static func repeatsInputContext(raw: String,
@@ -556,6 +736,8 @@ final class AppState: ObservableObject {
 
     private func fail(_ message: String) {
         stopClock()
+        liveCorrectionTask?.cancel()
+        liveCorrectionTask = nil
         capturedInputContext = .empty
         errorMessage = message
         phase = .failed

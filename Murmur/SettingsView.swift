@@ -23,7 +23,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .general: return "选择本地识别方式与文本整理策略"
+        case .general: return "设置 Apple Speech 主识别与文本整理策略"
         case .vocabulary: return "让技术词、产品名和专有名词更准确"
         case .shortcut: return "设置开始与停止语音输入的触发方式"
         case .permissions: return "检查录音、预览与自动插入所需权限"
@@ -46,7 +46,6 @@ struct SettingsView: View {
 
     @AppStorage(Keys.chatModel) private var chatModel = "deepseek-chat"
     @AppStorage(Keys.language) private var language = "zh"
-    @AppStorage(Keys.recognitionEngine) private var recognitionEngine = "whisper"
     @AppStorage(Keys.recognitionContext) private var recognitionContext = Keys.defaultRecognitionContext
     @AppStorage(Keys.enableBilingualRecognition) private var enableBilingualRecognition = false
     @AppStorage(Keys.enableCorrection) private var enableCorrection = true
@@ -158,14 +157,11 @@ struct SettingsView: View {
     private var generalPane: some View {
         VStack(alignment: .leading, spacing: 26) {
             settingsSection("语音识别") {
-                settingsRow(title: "识别引擎",
-                            detail: "Whisper 更适合中英混合；Apple Speech 更轻量。") {
-                    Picker("", selection: $recognitionEngine) {
-                        Text("Whisper Small").tag("whisper")
-                        Text("Apple Speech").tag("apple")
-                    }
-                    .labelsHidden()
-                    .frame(width: 190)
+                settingsRow(title: "识别策略",
+                            detail: "动态框中的 Apple Speech 结果是主文本；仅在没有结果时回退到本地 Whisper。") {
+                    Text("Apple Speech 优先")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(MurmurPalette.accent)
                 }
                 rowDivider
                 settingsRow(title: "主要语言",
@@ -184,26 +180,20 @@ struct SettingsView: View {
                 }
                 rowDivider
                 settingsRow(title: "实时预览",
-                            detail: "录音时显示 Apple Speech 的即时转写，不影响最终结果。") {
+                            detail: "动态显示识别结果；开启 DeepSeek 时会在停顿后实时整理，并与最终输入保持一致。") {
                     Toggle("", isOn: $enableLivePreview)
                         .labelsHidden()
                 }
-                if recognitionEngine == "apple" {
-                    rowDivider
-                    settingsRow(title: "英文辅助识别",
-                                detail: "实验功能。仅在 Apple 中文主识别明显漏掉英文时开启。") {
-                        Toggle("", isOn: $enableBilingualRecognition)
-                            .labelsHidden()
-                    }
+                rowDivider
+                settingsRow(title: "英文辅助识别",
+                            detail: "实验功能。仅在 Apple 中文主识别明显漏掉英文时开启。") {
+                    Toggle("", isOn: $enableBilingualRecognition)
+                        .labelsHidden()
                 }
             }
 
-            statusNote(systemName: LocalWhisperTranscriber.isAvailable
-                       ? "checkmark.circle.fill"
-                       : "exclamationmark.circle.fill",
-                       tint: LocalWhisperTranscriber.isAvailable
-                       ? MurmurPalette.accent
-                       : MurmurPalette.warning,
+            statusNote(systemName: "checkmark.circle.fill",
+                       tint: MurmurPalette.accent,
                        text: whisperStatusText)
 
             settingsSection("上下文与整理") {
@@ -214,7 +204,7 @@ struct SettingsView: View {
                 }
                 rowDivider
                 settingsRow(title: "DeepSeek 整理",
-                            detail: "仅做保守排版、断句和明确纠错；关闭后直接插入本地转写。") {
+                            detail: "独立词直接输入；句子和句中补词才进行标点、断句与保守纠错。") {
                     Toggle("", isOn: $enableCorrection)
                         .labelsHidden()
                 }
@@ -266,8 +256,6 @@ struct SettingsView: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(.tertiary)
         }
-        .animation(reduceMotion ? nil : MurmurMotion.gentle,
-                   value: recognitionEngine)
         .animation(reduceMotion ? nil : MurmurMotion.gentle,
                    value: enableCorrection)
     }
@@ -505,9 +493,9 @@ struct SettingsView: View {
 
     private var whisperStatusText: String {
         if LocalWhisperTranscriber.isAvailable {
-            return "Whisper Small 已就绪。最终转写优先在本机完成，Apple Speech 继续提供实时预览和自动回退。"
+            return "Apple Speech 为主识别。Whisper Small 已就绪，仅在 Apple Speech 没有结果时本地回退。"
         }
-        return "未检测到 Whisper Small 或 whisper.cpp，当前会自动使用 Apple Speech。"
+        return "Apple Speech 为主识别。未检测到 Whisper Small，因此没有本地回退。"
     }
 
     // MARK: - Hotkey recording
