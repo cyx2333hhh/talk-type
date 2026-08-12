@@ -1,25 +1,135 @@
 import Foundation
 
-/// Minimal DeepSeek client for the "tidy up + fix expression" pass. DeepSeek's
-/// API is OpenAI-compatible (chat completions); it has no speech-to-text, so
-/// transcription is completed locally before this runs.
-struct DeepSeekClient {
+/// AI services supported by the optional text-cleanup pass.
+///
+/// Speech recognition remains local. These providers only receive the
+/// recognized text and the optional cursor context used for cleanup.
+enum AIProvider: String, CaseIterable, Identifiable {
+    case deepSeek = "deepseek"
+    case anthropic
+    case openAI = "openai"
+    case grok
+    case qwen
+    case kimi
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .deepSeek: return "DeepSeek"
+        case .anthropic: return "Anthropic / Claude"
+        case .openAI: return "OpenAI"
+        case .grok: return "xAI / Grok"
+        case .qwen: return "Qwen / 通义千问"
+        case .kimi: return "Kimi / Moonshot"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .deepSeek: return "deepseek-chat"
+        case .anthropic: return "claude-sonnet-5"
+        case .openAI: return "gpt-5.6-luna"
+        case .grok: return "grok-4.5"
+        case .qwen: return "qwen-plus"
+        case .kimi: return "kimi-k3"
+        }
+    }
+
+    var endpointURL: URL {
+        switch self {
+        case .deepSeek:
+            return URL(string: "https://api.deepseek.com/chat/completions")!
+        case .anthropic:
+            return URL(string: "https://api.anthropic.com/v1/messages")!
+        case .openAI:
+            return URL(string: "https://api.openai.com/v1/chat/completions")!
+        case .grok:
+            return URL(string: "https://api.x.ai/v1/chat/completions")!
+        case .qwen:
+            return URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")!
+        case .kimi:
+            return URL(string: "https://api.moonshot.cn/v1/chat/completions")!
+        }
+    }
+
+    var apiKeyPlaceholder: String {
+        switch self {
+        case .deepSeek: return "sk-…"
+        case .anthropic: return "sk-ant-…"
+        case .openAI: return "sk-…"
+        case .grok: return "xai-…"
+        case .qwen: return "sk-…"
+        case .kimi: return "sk-…"
+        }
+    }
+
+    var usesAnthropicMessagesAPI: Bool { self == .anthropic }
+}
+
+/// Reads and writes the provider-specific AI settings without putting API
+/// keys in UserDefaults. The old DeepSeek chatModel key is retained as a
+/// compatibility fallback for existing installations.
+enum AISettings {
+    static var provider: AIProvider {
+        let raw = UserDefaults.standard.string(forKey: Keys.aiProvider)
+            ?? AIProvider.deepSeek.rawValue
+        return AIProvider(rawValue: raw) ?? .deepSeek
+    }
+
+    static var model: String {
+        model(for: provider)
+    }
+
+    static func model(for provider: AIProvider) -> String {
+        let models = UserDefaults.standard.dictionary(forKey: Keys.chatModels) as? [String: String]
+        if let stored = models?[provider.rawValue] {
+            let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+
+        if provider == .deepSeek,
+           let legacy = UserDefaults.standard.string(forKey: Keys.chatModel) {
+            let trimmed = legacy.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return provider.defaultModel
+    }
+
+    static func saveModel(_ model: String, for provider: AIProvider) {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        var models = UserDefaults.standard.dictionary(forKey: Keys.chatModels) as? [String: String] ?? [:]
+        models[provider.rawValue] = trimmed
+        UserDefaults.standard.set(models, forKey: Keys.chatModels)
+
+        // Keep the legacy value current for older builds and existing data.
+        if provider == .deepSeek {
+            UserDefaults.standard.set(trimmed, forKey: Keys.chatModel)
+        }
+    }
+}
+
+/// Unified text-cleanup client. The compatible providers use Chat
+/// Completions; Anthropic is adapted to its native Messages API.
+struct AIClient {
     enum ClientError: LocalizedError {
-        case missingKey
+        case missingKey(String)
         case badResponse(String)
         case emptyResult
 
         var errorDescription: String? {
             switch self {
-            case .missingKey:         return "未设置 DeepSeek API Key，请在设置中填写。"
+            case .missingKey(let provider): return "未设置 \(provider) API Key，请在设置中填写。"
             case .badResponse(let m): return m
             case .emptyResult:        return "没有获得有效结果。"
             }
         }
     }
 
-    var apiKey: String
-    var baseURL = URL(string: "https://api.deepseek.com")!
+    let provider: AIProvider
+    let apiKey: String
 
     func correct(_ text: String,
                  model: String,
@@ -27,12 +137,16 @@ struct DeepSeekClient {
                  alternateTranscript: String? = nil,
                  englishTranscript: String? = nil,
                  inputContext: FocusedTextContext = .empty) async throws -> String {
-        guard !apiKey.isEmpty else { throw ClientError.missingKey }
+        guard !apiKey.isEmpty else { throw ClientError.missingKey(provider.displayName) }
 
-        let url = baseURL.appendingPathComponent("chat/completions")
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: provider.endpointURL)
         req.httpMethod = "POST"
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if provider.usesAnthropicMessagesAPI {
+            req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+            req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        } else {
+            req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let system = """
@@ -131,40 +245,79 @@ struct DeepSeekClient {
         </input_context>
         """
 
-        struct Message: Encodable { let role: String; let content: String }
-        struct Payload: Encodable {
-            let model: String
-            let messages: [Message]
-            let temperature: Double
-            let stream: Bool
+        struct Message: Codable {
+            let role: String
+            let content: String
         }
-        let payload = Payload(
-            model: model,
-            messages: [
-                Message(role: "system", content: system),
-                Message(role: "user", content: user),
-            ],
-            temperature: 0,
-            stream: false
-        )
-        req.httpBody = try JSONEncoder().encode(payload)
+        let messages = [
+            Message(role: "system", content: system),
+            Message(role: "user", content: user),
+        ]
+
+        if provider.usesAnthropicMessagesAPI {
+            struct AnthropicPayload: Encodable {
+                let model: String
+                let max_tokens: Int
+                let system: String
+                let messages: [Message]
+                let temperature: Double
+            }
+            let payload = AnthropicPayload(
+                model: model.isEmpty ? provider.defaultModel : model,
+                max_tokens: 1024,
+                system: system,
+                messages: [Message(role: "user", content: user)],
+                temperature: 0
+            )
+            req.httpBody = try JSONEncoder().encode(payload)
+        } else {
+            struct ChatPayload: Encodable {
+                let model: String
+                let messages: [Message]
+                let temperature: Double
+                let stream: Bool
+            }
+            let payload = ChatPayload(
+                model: model.isEmpty ? provider.defaultModel : model,
+                messages: messages,
+                temperature: 0,
+                stream: false
+            )
+            req.httpBody = try JSONEncoder().encode(payload)
+        }
 
         let (data, resp) = try await URLSession.shared.data(for: req)
         if let http = resp as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             let detail = (String(data: data, encoding: .utf8) ?? "").prefix(300)
-            throw ClientError.badResponse("DeepSeek 请求失败（\(http.statusCode)）：\(detail)")
+            throw ClientError.badResponse("\(provider.displayName) 请求失败（\(http.statusCode)）：\(detail)")
         }
 
-        struct Response: Decodable {
-            struct Choice: Decodable {
-                struct Msg: Decodable { let content: String }
-                let message: Msg
+        let content: String?
+        if provider.usesAnthropicMessagesAPI {
+            struct AnthropicResponse: Decodable {
+                struct ContentBlock: Decodable {
+                    let type: String
+                    let text: String?
+                }
+                let content: [ContentBlock]
             }
-            let choices: [Choice]
+            let decoded = try? JSONDecoder().decode(AnthropicResponse.self, from: data)
+            content = decoded?.content
+                .filter { $0.type == "text" }
+                .compactMap(\.text)
+                .joined()
+        } else {
+            struct Response: Decodable {
+                struct Choice: Decodable {
+                    struct Msg: Decodable { let content: String? }
+                    let message: Msg
+                }
+                let choices: [Choice]
+            }
+            let decoded = try? JSONDecoder().decode(Response.self, from: data)
+            content = decoded?.choices.first?.message.content
         }
-        guard let decoded = try? JSONDecoder().decode(Response.self, from: data),
-              let content = decoded.choices.first?.message.content,
-              !content.isEmpty else {
+        guard let content, !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ClientError.emptyResult
         }
         return content.trimmingCharacters(in: .whitespacesAndNewlines)

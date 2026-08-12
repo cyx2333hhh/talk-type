@@ -1,16 +1,15 @@
 import Foundation
 import Security
 
-/// Stores the OpenAI API key in the login keychain as a generic password.
+/// Stores each provider's API key in the login keychain as a generic password.
 enum KeychainHelper {
     private static let service = "com.leon.Murmur"
-    private static let account = "deepseek-api-key"
 
-    static func save(_ value: String) {
+    static func save(_ value: String, for provider: AIProvider) {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account(for: provider),
         ]
         SecItemDelete(base as CFDictionary)
         guard !value.isEmpty else { return }
@@ -19,11 +18,11 @@ enum KeychainHelper {
         SecItemAdd(attrs as CFDictionary, nil)
     }
 
-    static func load() -> String? {
+    static func load(for provider: AIProvider) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account(for: provider),
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -34,5 +33,19 @@ enum KeychainHelper {
             return nil
         }
         return string
+    }
+
+    /// Compatibility helpers for older callers. Existing DeepSeek keys use
+    /// the same account name as the new provider-specific storage.
+    static func save(_ value: String) {
+        save(value, for: .deepSeek)
+    }
+
+    static func load() -> String? {
+        load(for: .deepSeek)
+    }
+
+    private static func account(for provider: AIProvider) -> String {
+        "\(provider.rawValue)-api-key"
     }
 }

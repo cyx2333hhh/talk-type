@@ -44,7 +44,7 @@ struct SettingsView: View {
     @EnvironmentObject var app: AppState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @AppStorage(Keys.chatModel) private var chatModel = "deepseek-chat"
+    @AppStorage(Keys.aiProvider) private var aiProviderRaw = AIProvider.deepSeek.rawValue
     @AppStorage(Keys.language) private var language = "zh"
     @AppStorage(Keys.recognitionContext) private var recognitionContext = Keys.defaultRecognitionContext
     @AppStorage(Keys.enableBilingualRecognition) private var enableBilingualRecognition = false
@@ -54,6 +54,7 @@ struct SettingsView: View {
     @AppStorage(Keys.hotKeyDisplay) private var hotKeyDisplay = "fn"
 
     @State private var selectedPane = SettingsPane.general
+    @State private var chatModel = AIProvider.deepSeek.defaultModel
     @State private var apiKey = ""
     @State private var recordingHotKey = false
     @State private var hotKeyMonitor: Any?
@@ -72,15 +73,32 @@ struct SettingsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .tint(MurmurPalette.accent)
         .onAppear {
-            apiKey = KeychainHelper.load() ?? ""
+            loadAISettings()
             refreshPermissions()
             apiKeyFocused = false
+        }
+        .onChange(of: aiProviderRaw) { _, _ in
+            loadAISettings()
+            apiKeyFocused = false
+        }
+        .onChange(of: chatModel) { _, newValue in
+            AISettings.saveModel(newValue, for: selectedAIProvider)
         }
         .onChange(of: selectedPane) { _, _ in
             apiKeyFocused = false
             if selectedPane != .shortcut { stopRecordingHotKey() }
         }
         .onDisappear { stopRecordingHotKey() }
+    }
+
+    private var selectedAIProvider: AIProvider {
+        AIProvider(rawValue: aiProviderRaw) ?? .deepSeek
+    }
+
+    private func loadAISettings() {
+        let provider = selectedAIProvider
+        chatModel = AISettings.model(for: provider)
+        apiKey = KeychainHelper.load(for: provider) ?? ""
     }
 
     private var sidebar: some View {
@@ -180,7 +198,7 @@ struct SettingsView: View {
                 }
                 rowDivider
                 settingsRow(title: "实时预览",
-                            detail: "动态显示识别结果；开启 DeepSeek 时会在停顿后实时整理，并与最终输入保持一致。") {
+                            detail: "动态显示识别结果；开启 AI 整理后会在停顿时实时整理，并与最终输入保持一致。") {
                     Toggle("", isOn: $enableLivePreview)
                         .labelsHidden()
                 }
@@ -203,19 +221,31 @@ struct SettingsView: View {
                         .labelsHidden()
                 }
                 rowDivider
-                settingsRow(title: "DeepSeek 整理",
-                            detail: "独立词直接输入；句子和句中补词才进行标点、断句与保守纠错。") {
+                settingsRow(title: "AI 文本整理",
+                            detail: "独立词直接输入；句子和句中补词才使用所选模型做标点、断句与保守纠错。") {
                     Toggle("", isOn: $enableCorrection)
                         .labelsHidden()
                 }
 
                 if enableCorrection {
                     rowDivider
-                    settingsRow(title: "API Key",
+                    settingsRow(title: "AI 供应商",
+                                detail: "切换不会覆盖其他供应商的 API Key 和模型配置。") {
+                        Picker("", selection: $aiProviderRaw) {
+                            ForEach(AIProvider.allCases) { provider in
+                                Text(provider.displayName).tag(provider.rawValue)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 190)
+                    }
+                    rowDivider
+                    settingsRow(title: "\(selectedAIProvider.displayName) API Key",
                                 detail: apiKey.isEmpty
                                 ? "未填写，当前仍只使用本地识别。"
-                                : "仅保存在 macOS 钥匙串。") {
-                        SecureField("sk-…", text: $apiKey)
+                                : "仅保存在 macOS 钥匙串，并与其他供应商隔离。") {
+                        SecureField(selectedAIProvider.apiKeyPlaceholder, text: $apiKey)
                             .textFieldStyle(.plain)
                             .focused($apiKeyFocused)
                             .font(.system(size: 12.5))
@@ -231,13 +261,14 @@ struct SettingsView: View {
                                             lineWidth: apiKeyFocused ? 1 : 0.5)
                             }
                             .onChange(of: apiKey) { _, newValue in
-                                KeychainHelper.save(newValue.trimmingCharacters(in: .whitespacesAndNewlines))
+                                KeychainHelper.save(newValue.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                    for: selectedAIProvider)
                             }
                     }
                     rowDivider
                     settingsRow(title: "整理模型",
-                                detail: "默认使用 deepseek-chat。") {
-                        TextField("deepseek-chat", text: $chatModel)
+                                detail: "默认使用 \(selectedAIProvider.defaultModel)，也可填写该供应商支持的模型 ID。") {
+                        TextField(selectedAIProvider.defaultModel, text: $chatModel)
                             .textFieldStyle(.plain)
                             .font(.system(size: 12, design: .monospaced))
                             .padding(.horizontal, 9)
@@ -252,7 +283,7 @@ struct SettingsView: View {
                 }
             }
 
-            Text("启用 DeepSeek 时，本次转写和可选的光标上下文会随整理请求发送；音频始终留在本机。")
+            Text("启用 \(selectedAIProvider.displayName) 整理时，本次转写和可选的光标上下文会随请求发送；音频始终留在本机。")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.tertiary)
         }
@@ -291,7 +322,7 @@ struct SettingsView: View {
                         .stroke(MurmurPalette.hairline, lineWidth: 0.5)
                 }
 
-            Text("每行或用逗号分隔一个词。Whisper 使用前 24 个作为弱提示，DeepSeek 使用前 80 个进行明确纠错；不会强行插入没有说过的词。")
+            Text("每行或用逗号分隔一个词。Whisper 使用前 24 个作为弱提示，当前 AI 使用前 80 个进行明确纠错；不会强行插入没有说过的词。")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 8)
