@@ -11,7 +11,7 @@ enum Keys {
     static let language = "language"
     static let recognitionContext = "recognitionContext"
     static let enableBilingualRecognition = "enableBilingualRecognition"
-    static let bilingualRecognitionSafetyReset = "bilingualRecognitionSafetyReset"
+    static let bilingualRecognitionDefaultMigration = "bilingualRecognitionDefaultMigration"
     static let enableCorrection = "enableCorrection"
     static let enableLivePreview = "enableLivePreview"
     static let useInputContext = "useInputContext"
@@ -76,7 +76,7 @@ enum Keys {
             chatModels: [:],
             language: "zh",
             recognitionContext: defaultRecognitionContext,
-            enableBilingualRecognition: false,
+            enableBilingualRecognition: true,
             enableCorrection: true,
             enableLivePreview: true,
             useInputContext: true,
@@ -152,7 +152,7 @@ final class AppState: ObservableObject {
 
     func bootstrap() {
         Keys.registerDefaults()
-        resetUnsafeBilingualDefaultIfNeeded()
+        enableBilingualRecognitionByDefaultIfNeeded()
         capture.onLevel = { [weak self] level in
             MainActor.assumeIsolated { self?.pushLevel(level) }
         }
@@ -224,16 +224,26 @@ final class AppState: ObservableObject {
         let lang = language
         if lang.isEmpty { return Locale.current.identifier }
         if lang.lowercased().hasPrefix("zh") { return "zh-CN" }
+        if lang.lowercased().hasPrefix("en") { return "en-US" }
         return lang
     }
-    private var shouldRunEnglishAssist: Bool {
-        bilingualRecognitionEnabled && recognitionLocale.lowercased().hasPrefix("zh")
+    private var bilingualAssistLocale: String? {
+        guard bilingualRecognitionEnabled else { return nil }
+        if recognitionLocale.lowercased().hasPrefix("zh") { return "en-US" }
+        if recognitionLocale.lowercased().hasPrefix("en") { return "zh-CN" }
+        return nil
     }
 
-    private func resetUnsafeBilingualDefaultIfNeeded() {
-        guard !UserDefaults.standard.bool(forKey: Keys.bilingualRecognitionSafetyReset) else { return }
-        UserDefaults.standard.set(false, forKey: Keys.enableBilingualRecognition)
-        UserDefaults.standard.set(true, forKey: Keys.bilingualRecognitionSafetyReset)
+    private var whisperRecognitionLanguage: String {
+        bilingualAssistLocale == nil ? language : "auto"
+    }
+
+    /// Earlier versions shipped this option disabled. Turn it on once when
+    /// upgrading, then continue to respect the user's own setting.
+    private func enableBilingualRecognitionByDefaultIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: Keys.bilingualRecognitionDefaultMigration) else { return }
+        UserDefaults.standard.set(true, forKey: Keys.enableBilingualRecognition)
+        UserDefaults.standard.set(true, forKey: Keys.bilingualRecognitionDefaultMigration)
     }
 
     var hotKeyDisplay: String {
@@ -343,11 +353,10 @@ final class AppState: ObservableObject {
         // Whisper is a last-resort fallback, never an automatic replacement.
         phase = .transcribing
         let contextualStrings = recognitionContextTerms
-        var usedWhisper = false
         var raw = liveTranscript
+        var speechGranted = AudioCapture.speechAuthorized()
 
         if raw.isEmpty {
-            var speechGranted = AudioCapture.speechAuthorized()
             if !speechGranted {
                 speechGranted = await AudioCapture.ensureSpeechPermission()
             }
@@ -359,13 +368,29 @@ final class AppState: ObservableObject {
             }
         }
 
+        // The primary recognizer supplies the live text. For Chinese-English
+        // input, run the opposite locale on the finished audio as a second
+        // opinion. It is used for conservative correction, never concatenated
+        // blindly with the primary transcript.
+        var bilingualAssist = ""
+        if let assistLocale = bilingualAssistLocale, speechGranted {
+            bilingualAssist = await AudioCapture.recognizeFile(url,
+                                                                localeIdentifier: assistLocale,
+                                                                contextualStrings: contextualStrings)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+
+        if raw.isEmpty, !bilingualAssist.isEmpty {
+            raw = bilingualAssist
+            bilingualAssist = ""
+        }
+
         if raw.isEmpty, LocalWhisperTranscriber.isAvailable {
             raw = await LocalWhisperTranscriber.transcribe(url,
-                                                           language: language,
+                                                           language: whisperRecognitionLanguage,
                                                            vocabulary: contextualStrings,
                                                            inputContext: inputContext)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            usedWhisper = !raw.isEmpty
         }
 
         guard !raw.isEmpty else {
@@ -383,18 +408,9 @@ final class AppState: ObservableObject {
                                                inputContext: inputContext,
                                                vocabulary: contextualStrings)
         if correctionEnabled, shouldUseAI, !key.isEmpty {
-            let englishAssist: String?
-            if shouldRunEnglishAssist && !usedWhisper {
-                englishAssist = await AudioCapture.recognizeFile(url,
-                                                                 localeIdentifier: "en-US",
-                                                                 contextualStrings: contextualStrings)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            } else {
-                englishAssist = nil
-            }
-
             phase = .correcting
-            if !reusableCorrection.isEmpty,
+            if bilingualAssist.isEmpty,
+               !reusableCorrection.isEmpty,
                raw == liveTranscript,
                AppState.shouldAcceptCorrectedText(raw: raw,
                                                   cleaned: reusableCorrection,
@@ -404,7 +420,8 @@ final class AppState: ObservableObject {
                                                         apiKey: key).correct(raw,
                                                                              model: chatModel,
                                                                              contextualStrings: contextualStrings,
-                                                                             englishTranscript: englishAssist,
+                                                                             bilingualAssistTranscript: bilingualAssist,
+                                                                             primaryLocale: recognitionLocale,
                                                                              inputContext: inputContext),
                       !cleaned.isEmpty,
                       AppState.shouldAcceptCorrectedText(raw: raw,
@@ -466,6 +483,7 @@ final class AppState: ObservableObject {
                     raw,
                     model: model,
                     contextualStrings: contextualStrings,
+                    primaryLocale: self.recognitionLocale,
                     inputContext: inputContext
                 )
                 try Task.checkCancellation()

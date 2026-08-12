@@ -47,7 +47,7 @@ struct SettingsView: View {
     @AppStorage(Keys.aiProvider) private var aiProviderRaw = AIProvider.deepSeek.rawValue
     @AppStorage(Keys.language) private var language = "zh"
     @AppStorage(Keys.recognitionContext) private var recognitionContext = Keys.defaultRecognitionContext
-    @AppStorage(Keys.enableBilingualRecognition) private var enableBilingualRecognition = false
+    @AppStorage(Keys.enableBilingualRecognition) private var enableBilingualRecognition = true
     @AppStorage(Keys.enableCorrection) private var enableCorrection = true
     @AppStorage(Keys.enableLivePreview) private var enableLivePreview = true
     @AppStorage(Keys.useInputContext) private var useInputContext = true
@@ -93,6 +93,13 @@ struct SettingsView: View {
 
     private var selectedAIProvider: AIProvider {
         AIProvider(rawValue: aiProviderRaw) ?? .deepSeek
+    }
+
+    private var primaryLanguageSelection: Binding<String> {
+        Binding(
+            get: { language.lowercased().hasPrefix("en") ? "en" : "zh" },
+            set: { language = $0 == "en" ? "en-US" : "zh-CN" }
+        )
     }
 
     private func loadAISettings() {
@@ -182,19 +189,15 @@ struct SettingsView: View {
                         .foregroundStyle(MurmurPalette.accent)
                 }
                 rowDivider
-                settingsRow(title: "主要语言",
-                            detail: "中文为主的中英混合建议使用 zh。") {
-                    TextField("zh", text: $language)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12.5, design: .monospaced))
-                        .padding(.horizontal, 9)
-                        .frame(width: 120, height: 30)
-                        .background(MurmurPalette.surface,
-                                    in: RoundedRectangle(cornerRadius: 6))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(MurmurPalette.hairline, lineWidth: 0.5)
-                        }
+                settingsRow(title: "输入语言",
+                            detail: "选择主要识别语言；中英混合识别会自动使用另一种语言辅助复核。") {
+                    Picker("", selection: primaryLanguageSelection) {
+                        Text("中文").tag("zh")
+                        Text("English").tag("en")
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 178)
                 }
                 rowDivider
                 settingsRow(title: "实时预览",
@@ -203,8 +206,8 @@ struct SettingsView: View {
                         .labelsHidden()
                 }
                 rowDivider
-                settingsRow(title: "英文辅助识别",
-                            detail: "实验功能。仅在 Apple 中文主识别明显漏掉英文时开启。") {
+                settingsRow(title: "中英混合识别",
+                            detail: "默认开启。结束录音后用另一种语言复核；配合 AI 整理可纠正混合词。") {
                     Toggle("", isOn: $enableBilingualRecognition)
                         .labelsHidden()
                 }

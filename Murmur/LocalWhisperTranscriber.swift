@@ -17,8 +17,10 @@ enum LocalWhisperTranscriber {
         guard let executableURL,
               FileManager.default.fileExists(atPath: selectedModelURL.path) else { return nil }
 
-        let prompt = makePrompt(vocabulary: vocabulary, inputContext: inputContext)
         let whisperLanguage = normalizedLanguage(language)
+        let prompt = makePrompt(language: whisperLanguage,
+                                vocabulary: vocabulary,
+                                inputContext: inputContext)
         var arguments = [
             "-m", selectedModelURL.path,
             "-f", audioURL.path,
@@ -110,9 +112,19 @@ enum LocalWhisperTranscriber {
         return normalized.split(separator: "-").first.map(String.init) ?? "auto"
     }
 
-    private static func makePrompt(vocabulary: [String],
+    private static func makePrompt(language: String,
+                                   vocabulary: [String],
                                    inputContext: FocusedTextContext) -> String {
-        var parts = ["以下是以中文为主、可能夹杂英文专名的语音记录。"]
+        let languageHint: String
+        switch language {
+        case "en":
+            languageHint = "The following is English speech and may include Chinese words, names, or technical terms."
+        case "auto":
+            languageHint = "以下是一段中文和英文混合的语音记录。"
+        default:
+            languageHint = "以下是以中文为主、可能夹杂英文专名的语音记录。"
+        }
+        var parts = [languageHint]
 
         // A short hint improves proper nouns without flooding the decoder with
         // English tokens that could make ordinary Chinese sound like English.
