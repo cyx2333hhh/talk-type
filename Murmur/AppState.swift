@@ -5,7 +5,9 @@ import NaturalLanguage
 
 /// User-defaults keys + their default values.
 enum Keys {
+    static let aiProvider = "aiProvider"
     static let chatModel = "chatModel"
+    static let chatModels = "chatModels"
     static let language = "language"
     static let recognitionContext = "recognitionContext"
     static let enableBilingualRecognition = "enableBilingualRecognition"
@@ -69,7 +71,9 @@ enum Keys {
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
+            aiProvider: AIProvider.deepSeek.rawValue,
             chatModel: "deepseek-chat",
+            chatModels: [:],
             language: "zh",
             recognitionContext: defaultRecognitionContext,
             enableBilingualRecognition: false,
@@ -190,8 +194,11 @@ final class AppState: ObservableObject {
 
     // MARK: - Settings accessors
 
+    private var aiProvider: AIProvider {
+        AISettings.provider
+    }
     private var chatModel: String {
-        UserDefaults.standard.string(forKey: Keys.chatModel) ?? "deepseek-chat"
+        AISettings.model
     }
     private var language: String {
         UserDefaults.standard.string(forKey: Keys.language) ?? ""
@@ -367,9 +374,11 @@ final class AppState: ObservableObject {
         }
         partialText = raw
 
-        // 2) Optionally tidy up / correct with DeepSeek (falls back to raw on failure).
+        // 2) Optionally tidy up / correct with the selected AI provider
+        // (falls back to raw on failure).
         var text = raw
-        let key = KeychainHelper.load() ?? ""
+        let provider = aiProvider
+        let key = KeychainHelper.load(for: provider) ?? ""
         let shouldUseAI = AppState.shouldUseAI(for: raw,
                                                inputContext: inputContext,
                                                vocabulary: contextualStrings)
@@ -391,11 +400,12 @@ final class AppState: ObservableObject {
                                                   cleaned: reusableCorrection,
                                                   inputContext: inputContext) {
                 text = reusableCorrection
-            } else if let cleaned = try? await DeepSeekClient(apiKey: key).correct(raw,
-                                                                                   model: chatModel,
-                                                                                   contextualStrings: contextualStrings,
-                                                                                   englishTranscript: englishAssist,
-                                                                                   inputContext: inputContext),
+            } else if let cleaned = try? await AIClient(provider: provider,
+                                                        apiKey: key).correct(raw,
+                                                                             model: chatModel,
+                                                                             contextualStrings: contextualStrings,
+                                                                             englishTranscript: englishAssist,
+                                                                             inputContext: inputContext),
                       !cleaned.isEmpty,
                       AppState.shouldAcceptCorrectedText(raw: raw,
                                                          cleaned: cleaned,
@@ -440,6 +450,7 @@ final class AppState: ObservableObject {
                                    inputContext: inputContext,
                                    vocabulary: contextualStrings) else { return }
 
+        let provider = aiProvider
         let model = chatModel
         liveCorrectionTask = Task { @MainActor [weak self] in
             do {
@@ -449,9 +460,9 @@ final class AppState: ObservableObject {
                       self.phase == .recording,
                       self.liveRawTranscript == raw else { return }
 
-                let key = KeychainHelper.load() ?? ""
+                let key = KeychainHelper.load(for: provider) ?? ""
                 guard !key.isEmpty else { return }
-                let cleaned = try await DeepSeekClient(apiKey: key).correct(
+                let cleaned = try await AIClient(provider: provider, apiKey: key).correct(
                     raw,
                     model: model,
                     contextualStrings: contextualStrings,
